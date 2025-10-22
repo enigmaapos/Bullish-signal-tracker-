@@ -44,152 +44,131 @@
     <tbody id="results"></tbody>
   </table>
 
-<script>
-const API_BASE = 'https://fapi.binance.com';
-const INTERVAL = '15m';
-const CANDLES = 200;
-const DELAY_MS = 1000;           // 1 req/sec safe
-const CROSS_MAX_AGE = 25;        // must be <= 25 candles ago
-const CROSS_WINDOW = 96;         // only search inside last 96 candles
+    <script>
+const apiBase = "https://fapi.binance.com";
+const tf = "15m";
+const candlesLimit = 200;
+const delayMs = 1000; // safe rate: 1 request/sec
+const maxPairs = 100; // limit pairs per scan
+const SCAN_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes cooldown
+let lastScanTime = 0;
+let isScanning = false;
 
-// --- helpers ---
-function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
-function toUTC(ts){ return new Date(ts).toISOString().replace('T',' ').replace('.000Z',' UTC'); }
+async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// Robust EMA: returns array same length as values. Entries before first valid EMA -> null.
-// Seed first EMA at index (period-1) with SMA of first period values.
-function emaArray(values, period){
-  const out = new Array(values.length).fill(null);
-  if(values.length < period) return out;
-  // seed sma
-  let sum = 0;
-  for(let i=0;i<period;i++) sum += values[i];
-  let prev = sum / period;
-  out[period-1] = prev;
-  const k = 2/(period+1);
-  for(let i = period; i < values.length; i++){
-    prev = (values[i] - prev)*k + prev;
-    out[i] = prev;
+function ema(values, period) {
+  const k = 2 / (period + 1);
+  let emaArray = [values[0]];
+  for (let i = 1; i < values.length; i++) {
+    emaArray.push(values[i] * k + emaArray[i - 1] * (1 - k));
   }
-  return out;
+  return emaArray;
 }
 
-// fetch perpetual USDT symbols
-async function fetchPerpSymbols(){
-  const res = await fetch(`${API_BASE}/fapi/v1/exchangeInfo`);
-  if(!res.ok) throw new Error('exchangeInfo failed');
+async function fetchCandles(symbol) {
+  const url = `${apiBase}/fapi/v1/klines?symbol=${symbol}&interval=${tf}&limit=${candlesLimit}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Error fetching ${symbol}`);
   const data = await res.json();
-  return data.symbols.filter(s => s.contractType === 'PERPETUAL' && s.symbol.endsWith('USDT')).map(s=>s.symbol);
+  return data.map(c => parseFloat(c[4]));
 }
 
-// fetch 24hr tickers and return green (priceChangePercent>0) filtered & sorted desc
-async function fetchGreenTickers(){
-  const res = await fetch(`${API_BASE}/fapi/v1/ticker/24hr`);
-  if(!res.ok) throw new Error('ticker/24hr failed');
+async function getAllSymbols() {
+  const res = await fetch(`${apiBase}/fapi/v1/exchangeInfo`);
+  const data = await res.json();
+  return data.symbols
+    .filter(s => s.contractType === "PERPETUAL" && s.symbol.endsWith("USDT"))
+    .map(s => s.symbol);
+}
+
+async function getGreenSymbols() {
+  const res = await fetch(`${apiBase}/fapi/v1/ticker/24hr`);
   const data = await res.json();
   return data
-    .filter(t => t.symbol.endsWith('USDT') && parseFloat(t.priceChangePercent) > 0)
-    .map(t => ({ symbol: t.symbol, change: parseFloat(t.priceChangePercent) }))
-    .sort((a,b)=>b.change - a.change);
+    .filter(t => t.symbol.endsWith("USDT") && parseFloat(t.priceChangePercent) > 0)
+    .map(t => ({
+      symbol: t.symbol,
+      change: parseFloat(t.priceChangePercent)
+    }));
 }
 
-// fetch candles (we need times too)
-async function fetchKlines(symbol){
-  const url = `${API_BASE}/fapi/v1/klines?symbol=${symbol}&interval=${INTERVAL}&limit=${CANDLES}`;
-  const res = await fetch(url);
-  if(!res.ok) throw new Error('klines failed for ' + symbol);
-  const data = await res.json();
-  // each row: [ openTime, open, high, low, close, ... ]
-  return data.map(r => ({ t: r[0], close: parseFloat(r[4]) }));
-}
-
-// find EMA70>EMA200 bullish cross index inside last CROSS_WINDOW candles
-// returns object { index, candlesAgo, timestamp } or null
-function findEma70AboveEma200Cross(ema70, ema200, klines){
-  const n = ema70.length;
-  const start = Math.max(1, n - CROSS_WINDOW); // ensure i-1 valid
-  for(let i = n-1; i >= start; i--){
-    const prev70 = ema70[i-1], prev200 = ema200[i-1];
-    const now70 = ema70[i], now200 = ema200[i];
-    if(prev70 == null || prev200 == null || now70 == null || now200 == null) continue;
-    // prev <= and now >
-    if(prev70 <= prev200 && now70 > now200){
-      const candlesAgo = n - 1 - i; // 0 means current candle, 1 means previous candle
-      return { index: i, candlesAgo, timestamp: klines[i].t };
-    }
+function findRecentCrossIndex(ema70, ema200) {
+  for (let i = ema70.length - 1; i >= 1; i--) {
+    const isBull = ema70[i] > ema200[i];
+    const wasBull = ema70[i - 1] <= ema200[i - 1];
+    if (isBull && wasBull === false) return i;
   }
-  return null;
+  return -1;
 }
 
-// UI helpers
-function setProgress(text){ document.getElementById('progress').innerText = text; }
-function setCount(text){ document.getElementById('count').innerHTML = text; }
-function setFound(text){ document.getElementById('found').innerHTML = text; }
+async function startScan() {
+  const now = Date.now();
+  if (isScanning) {
+    alert("⚠️ Scan already in progress. Please wait for it to finish.");
+    return;
+  }
+  if (now - lastScanTime < SCAN_COOLDOWN_MS) {
+    const waitMin = Math.ceil((SCAN_COOLDOWN_MS - (now - lastScanTime)) / 60000);
+    alert(`⏳ Please wait ${waitMin} minute(s) before next scan.`);
+    return;
+  }
 
-document.getElementById('startBtn').addEventListener('click', async ()=>{
-  document.getElementById('results').innerHTML = '';
-  setProgress('Loading symbols & 24h tickers...');
-  try{
-    const [allSymbols, green] = await Promise.all([fetchPerpSymbols(), fetchGreenTickers()]);
-    // only keep green symbols that are listed perpetual USDT
-    const greenPerp = green.filter(g => allSymbols.includes(g.symbol));
-    setCount(`🟢 Green 24h pairs: <strong style="color:#00ff88">${greenPerp.length}</strong>`);
-    setFound('Found: 0');
-    if(greenPerp.length === 0){
-      setProgress('No green pairs found.');
-      return;
-    }
+  isScanning = true;
+  lastScanTime = now;
+  document.getElementById("startBtn").disabled = true;
+  document.getElementById("results").innerHTML = "";
+  const progress = document.getElementById("progress");
+  const count = document.getElementById("count");
 
-    let found = 0;
-    for(let i=0;i<greenPerp.length;i++){
-      const symObj = greenPerp[i];
-      setProgress(`Scanning ${i+1}/${greenPerp.length} — ${symObj.symbol}`);
-      try{
-        // fetch raw klines (with times)
-        const klines = await fetchKlines(symObj.symbol);
-        const closes = klines.map(k=>k.close);
-        const ema70 = emaArray(closes, 70);
-        const ema200 = emaArray(closes, 200);
+  progress.innerText = "Fetching 24h green pairs...";
+  const allSymbols = await getAllSymbols();
+  const greenList = await getGreenSymbols();
+  let greenSymbols = greenList.filter(g => allSymbols.includes(g.symbol));
 
-        const cross = findEma70AboveEma200Cross(ema70, ema200, klines);
-        if(cross && cross.candlesAgo <= CROSS_MAX_AGE){
-          found++;
-          // data for table
-          const e70 = ema70[ema70.length-1];
-          const e200 = ema200[ema200.length-1];
-          const row = document.createElement('tr');
-          row.innerHTML = `
-            <td>${symObj.symbol}</td>
-            <td style="color:#00ff88">${symObj.change.toFixed(2)}%</td>
-            <td>${e70 ? e70.toFixed(6) : '-'}</td>
-            <td>${e200 ? e200.toFixed(6) : '-'}</td>
-            <td>${cross.candlesAgo}</td>
-            <td>${toUTC(cross.timestamp)}</td>
-            <td class="ok">✅ Cross (${cross.candlesAgo} candles ago)</td>
-          `;
-          document.getElementById('results').appendChild(row);
+  // Shuffle and limit to 100 pairs
+  greenSymbols = greenSymbols.sort(() => 0.5 - Math.random()).slice(0, maxPairs);
 
-          // console debug for verification
-          console.log('MATCH', symObj.symbol, {
-            crossIndex: cross.index,
-            candlesAgo: cross.candlesAgo,
-            timestampUTC: toUTC(cross.timestamp),
-            lastCloseTimeUTC: toUTC(klines[klines.length-1].t)
-          });
-        }
-      } catch(err){
-        console.warn('skip', symObj.symbol, err.message);
+  count.innerHTML = `🟢 Found <span class="ok">${greenSymbols.length}</span> green USDT perpetual pairs (scanning max ${maxPairs})`;
+  progress.innerHTML = `<span class="warn">Starting EMA scan for 100 pairs (safe mode)...</span>`;
+
+  let found = 0;
+  for (let i = 0; i < greenSymbols.length; i++) {
+    const { symbol, change } = greenSymbols[i];
+    progress.innerText = `Scanning ${i + 1}/${greenSymbols.length} - ${symbol}`;
+
+    try {
+      const closes = await fetchCandles(symbol);
+      const ema70 = ema(closes, 70);
+      const ema200 = ema(closes, 200);
+      const crossIndex = findRecentCrossIndex(ema70, ema200);
+
+      const candlesSinceCross = ema70.length - crossIndex;
+      if (crossIndex !== -1 && candlesSinceCross <= 25) {
+        found++;
+        const e70 = ema70.at(-1);
+        const e200 = ema200.at(-1);
+
+        const row = `<tr>
+          <td>${symbol}</td>
+          <td style="color:#00ff88;">${change.toFixed(2)}%</td>
+          <td>${e70.toFixed(2)}</td>
+          <td>${e200.toFixed(2)}</td>
+          <td class="ok">✅ Bullish EMA70>EMA200 (${candlesSinceCross} candles ago)</td>
+        </tr>`;
+        document.getElementById("results").insertAdjacentHTML("beforeend", row);
       }
-      // safe delay
-      await sleep(DELAY_MS);
-      setFound(`Found: ${found}`);
+    } catch (e) {
+      console.warn("Error on", symbol, e.message);
     }
-    setProgress(`Scan complete. Found ${found} matching pairs.`);
-  }catch(err){
-    console.error(err);
-    setProgress('Error: '+err.message);
+
+    await sleep(delayMs);
   }
-});
-</script>
+
+  progress.innerHTML = `<span class="ok">✅ Scan complete. Found ${found} pairs with EMA70>EMA200 within last 25 candles.</span>`;
+  document.getElementById("startBtn").disabled = false;
+  isScanning = false;
+}
+document.getElementById("startBtn").addEventListener("click", startScan);
+    </script>
 </body>
 </html>
