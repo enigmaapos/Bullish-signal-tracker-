@@ -1,4 +1,40 @@
-<script>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Binance Futures EMA14 > EMA70 > EMA200 Detector</title>
+  <style>
+    body { font-family: Arial; background: #0b0b0b; color: #f1f1f1; }
+    h2 { color: #00ffae; }
+    button { padding: 10px 20px; margin: 10px 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #333; padding: 6px; text-align: center; }
+    .bullish { color: #00ff66; }
+    .neutral { color: #ccc; }
+  </style>
+</head>
+<body>
+  <h2>Binance Futures EMA14 > EMA70 > EMA200 Detector</h2>
+  <p>Timeframe: 15m | Safe rate: 1 req/sec | Candles: 200</p>
+
+  <button onclick="startScan()">Start Scan</button>
+  <p id="progress"></p>
+  <p id="greenCount"></p>
+
+  <table id="results">
+    <thead>
+      <tr>
+        <th>Pair</th>
+        <th>EMA14</th>
+        <th>EMA70</th>
+        <th>EMA200</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
 const apiBase = "https://fapi.binance.com";
 const tf = "15m";
 const candlesLimit = 200;
@@ -110,3 +146,5 @@ async function startScan() {
 }
 document.getElementById("startBtn").addEventListener("click", startScan);
 </script>
+</body>
+</html>
