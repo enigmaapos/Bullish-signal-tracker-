@@ -335,6 +335,7 @@ document.getElementById("greenBearish").onclick=()=>startScan("green_bearish");
 document.getElementById("redBearish").onclick=()=>startScan("red_bearish");
 
 preloadCounts();
+  setInterval(preloadCounts, 60000); // refresh every 60s
 </script>
 </body>
 </html>
