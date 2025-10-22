@@ -184,13 +184,15 @@
 const apiBase = "https://fapi.binance.com";
 const tf = "15m";
 const candlesLimit = 200;
-const concurrency = 10;
-const delayMs = 1000;
+const concurrency = 10;       // ✅ 10 pairs per batch
+const delayMs = 1000;         // ✅ 1s between batches (10/sec → safe)
 const recentLimit = 25;
-const cooldownMs = 30000;
+const cooldownMs = 30000;     // ✅ manual click cooldown
+const autoRefreshInterval = 5 * 60 * 1000; // ✅ 5-minute auto-update
 
 let isScanning = false;
 let lastScanTime = 0;
+let autoRefreshTimer = null;
 
 async function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
@@ -268,11 +270,33 @@ async function processSymbol({symbol, change}, mode){
   }catch{return null;}
 }
 
-async function startScan(mode){
-  if(isScanning) return alert("⚠️ Scan in progress. Wait.");
+function disableButtons(state){
+  document.querySelectorAll("button").forEach(btn=>btn.disabled=state);
+}
+
+function updateProgress(percent){
+  document.getElementById("progress-bar").style.width = `${Math.min(100,percent)}%`;
+}
+
+// === Auto-refresh system ===
+function startAutoRefresh(mode) {
+  if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+  autoRefreshTimer = setInterval(() => {
+    console.log(`🔁 Auto-refreshing ${mode} scan...`);
+    startScan(mode, true);
+  }, autoRefreshInterval);
+}
+
+// === Main scanner ===
+async function startScan(mode, auto = false){
+  if(isScanning){
+    if(!auto) alert("⚠️ Scan already running. Wait...");
+    return;
+  }
+
   const now = Date.now();
-  if(now - lastScanTime < cooldownMs){
-    return alert(`⏳ Wait ${(cooldownMs - (now - lastScanTime))/1000|0}s.`);
+  if(!auto && (now - lastScanTime < cooldownMs)){
+    return alert(`⏳ Wait ${(cooldownMs - (now - lastScanTime))/1000|0}s before rescanning.`);
   }
 
   isScanning = true;
@@ -281,11 +305,11 @@ async function startScan(mode){
   updateProgress(0);
 
   const resultsEl = document.getElementById("results");
+  const txt = document.getElementById("progressText");
   resultsEl.innerHTML = "";
   document.getElementById("foundCount").textContent = 0;
-  const txt = document.getElementById("progressText");
-  txt.textContent = "Fetching pairs...";
 
+  txt.textContent = auto ? "Auto-refreshing..." : "Fetching 24h tickers...";
   const tickers = await get24hSymbols();
   const filtered = tickers.filter(t=>{
     if(!t.symbol.endsWith("USDT")) return false;
@@ -308,7 +332,9 @@ async function startScan(mode){
         <td>${r.symbol}</td>
         <td style="color:${r.change>0?"#00ff88":"#ff5555"}">${r.change.toFixed(2)}%</td>
         <td>${r.e14}</td><td>${r.e70}</td><td>${r.e200}</td>
-        <td class="${r.mode.includes("bullish")?'ok':'bear'}">${r.mode.includes("bullish")?'✅ Bullish':'⚠️ Bearish'} (${r.barsAgo} candles ago)</td>
+        <td class="${r.mode.includes("bullish")?'ok':'bear'}">
+          ${r.mode.includes("bullish")?'✅ Bullish':'⚠️ Bearish'} (${r.barsAgo} candles ago)
+        </td>
       </tr>`;
       resultsEl.insertAdjacentHTML("beforeend", row);
     });
@@ -316,26 +342,22 @@ async function startScan(mode){
     await sleep(delayMs);
   }
 
-  txt.textContent = `✅ Completed. Found ${found} crosses.`;
+  txt.textContent = `✅ ${auto ? "Auto-update complete" : "Scan complete"}. Found ${found} crosses.`;
   disableButtons(false);
-  isScanning=false;
+  isScanning = false;
+
+  if(!auto) startAutoRefresh(mode); // ✅ enable auto-update after first manual scan
 }
 
-function disableButtons(state){
-  document.querySelectorAll("button").forEach(btn=>btn.disabled=state);
-}
-
-function updateProgress(percent){
-  document.getElementById("progress-bar").style.width = `${Math.min(100,percent)}%`;
-}
-
+// === UI bindings ===
 document.getElementById("greenBullish").onclick=()=>startScan("green_bullish");
 document.getElementById("redBullish").onclick=()=>startScan("red_bullish");
 document.getElementById("greenBearish").onclick=()=>startScan("green_bearish");
 document.getElementById("redBearish").onclick=()=>startScan("red_bearish");
 
+// === preload counters ===
 preloadCounts();
-  setInterval(preloadCounts, 60000); // refresh every 60s
-</script>
+setInterval(preloadCounts, 60000); // update green/red counts every 60 s
+      </script>
 </body>
 </html>
