@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Binance Futures EMA Detector</title>
+<title>Binance Futures EMA Detector (Fast)</title>
 <style>
   body { font-family: Arial, sans-serif; background: #0d1117; color: #eee; text-align: center; }
   h1 { color: #f1c40f; }
@@ -17,7 +17,7 @@
 </style>
 </head>
 <body>
-<h1>Binance Futures EMA Detector — Green Candle + Recent Bullish EMA70/EMA200 Cross</h1>
+<h1>Binance Futures EMA Detector — 24h Green + Recent Bullish EMA70/200 Cross</h1>
 <p>Timeframe: 15m | Safe rate: 1 request/sec | Candles: 200</p>
 <button id="startBtn">Start Scan</button>
 <div id="progress"></div>
@@ -25,6 +25,7 @@
   <thead>
     <tr>
       <th>Pair</th>
+      <th>24h Change</th>
       <th>EMA14</th>
       <th>EMA70</th>
       <th>EMA200</th>
@@ -38,7 +39,7 @@
 const apiBase = "https://fapi.binance.com";
 const tf = "15m";
 const candlesLimit = 200;
-const delayMs = 1000; // safe rate
+const delayMs = 1000; // safe rate 1 req/sec
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -51,17 +52,6 @@ function ema(values, period) {
   return emaArray;
 }
 
-async function fetchCandles(symbol) {
-  const url = `${apiBase}/fapi/v1/klines?symbol=${symbol}&interval=${tf}&limit=${candlesLimit}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Error fetching ${symbol}`);
-  const data = await res.json();
-  return data.map(c => ({
-    open: parseFloat(c[1]),
-    close: parseFloat(c[4])
-  }));
-}
-
 function isEmaRising(arr) {
   const len = arr.length;
   return arr[len - 1] > arr[len - 2];
@@ -71,13 +61,12 @@ function checkRecentBullishCross(ema70, ema200) {
   const len = ema70.length;
   const lookback = 25;
   for (let i = len - lookback; i < len; i++) {
-    if (ema70[i - 1] < ema200[i - 1] && ema70[i] > ema200[i]) {
-      return true;
-    }
+    if (ema70[i - 1] < ema200[i - 1] && ema70[i] > ema200[i]) return true;
   }
   return false;
 }
 
+// ---- Phase 1: Get all perpetual USDT pairs ----
 async function getAllSymbols() {
   const res = await fetch(`${apiBase}/fapi/v1/exchangeInfo`);
   const data = await res.json();
@@ -86,26 +75,45 @@ async function getAllSymbols() {
     .map(s => s.symbol);
 }
 
+// ---- Phase 1: Get 24h tickers and filter green ----
+async function getGreenSymbols() {
+  const res = await fetch(`${apiBase}/fapi/v1/ticker/24hr`);
+  const data = await res.json();
+  return data
+    .filter(t => t.symbol.endsWith("USDT") && parseFloat(t.priceChangePercent) > 0)
+    .map(t => ({
+      symbol: t.symbol,
+      change: parseFloat(t.priceChangePercent)
+    }));
+}
+
+// ---- Phase 2: Fetch 15m candles and detect EMA cross ----
+async function fetchCandles(symbol) {
+  const url = `${apiBase}/fapi/v1/klines?symbol=${symbol}&interval=${tf}&limit=${candlesLimit}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Error fetching ${symbol}`);
+  const data = await res.json();
+  return data.map(c => parseFloat(c[4]));
+}
+
 async function startScan() {
   document.getElementById("results").innerHTML = "";
   const progress = document.getElementById("progress");
+  progress.innerText = "Fetching 24h green pairs...";
+
   const allSymbols = await getAllSymbols();
+  const tickers = await getGreenSymbols();
+
+  // Filter only green perpetual symbols
+  const greenSymbols = tickers.filter(t => allSymbols.includes(t.symbol));
+  progress.innerText = `Found ${greenSymbols.length} green USDT perpetual pairs. Scanning EMA crosses...`;
+
   let found = 0;
-  for (let i = 0; i < allSymbols.length; i++) {
-    const sym = allSymbols[i];
-    progress.innerText = `Scanning ${i + 1}/${allSymbols.length} - ${sym}`;
+  for (let i = 0; i < greenSymbols.length; i++) {
+    const { symbol, change } = greenSymbols[i];
+    progress.innerText = `Scanning ${i + 1}/${greenSymbols.length} - ${symbol}`;
     try {
-      const candles = await fetchCandles(sym);
-      const lastCandle = candles.at(-1);
-      const isGreen = lastCandle.close > lastCandle.open;
-
-      // Skip red candles for speed
-      if (!isGreen) {
-        await sleep(delayMs);
-        continue;
-      }
-
-      const closes = candles.map(c => c.close);
+      const closes = await fetchCandles(symbol);
       const ema14 = ema(closes, 14);
       const ema70 = ema(closes, 70);
       const ema200 = ema(closes, 200);
@@ -120,7 +128,8 @@ async function startScan() {
       if (condition) {
         found++;
         const row = `<tr>
-          <td>${sym}</td>
+          <td>${symbol}</td>
+          <td style="color:#00ff88;">${change.toFixed(2)}%</td>
           <td>${e14.toFixed(2)}</td>
           <td>${e70.toFixed(2)}</td>
           <td>${e200.toFixed(2)}</td>
@@ -129,11 +138,11 @@ async function startScan() {
         document.getElementById("results").insertAdjacentHTML("beforeend", row);
       }
     } catch (e) {
-      console.warn("Error on", sym, e.message);
+      console.warn("Error on", symbol, e.message);
     }
-    await sleep(delayMs);
+    await sleep(delayMs); // safe delay for Binance API
   }
-  progress.innerHTML = `<span class="warn">Scan complete. Found ${found} pairs with green candles and recent bullish crosses ✅</span>`;
+  progress.innerHTML = `<span class="warn">✅ Scan complete. Found ${found} pairs with green price and recent EMA70/200 bullish crosses.</span>`;
 }
 
 document.getElementById("startBtn").addEventListener("click", startScan);
