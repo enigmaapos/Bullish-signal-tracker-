@@ -13,7 +13,8 @@
   tr:nth-child(odd) { background: #161b22; }
   .ok { color: #00ff88; font-weight: bold; }
   .warn { color: #ffcc00; }
-  #progress { margin-top: 10px; }
+  #progress { margin-top: 10px; font-weight: bold; }
+  #count { color: #00ff88; font-weight: bold; font-size: 18px; margin-top: 10px; }
 </style>
 </head>
 <body>
@@ -22,6 +23,8 @@
 Stage 2: Check only those for <span class="warn">EMA70/200 bullish cross (15m)</span></p>
 <button id="startBtn">Start Scan</button>
 <div id="progress"></div>
+<div id="count"></div>
+
 <table>
   <thead>
     <tr>
@@ -39,7 +42,7 @@ Stage 2: Check only those for <span class="warn">EMA70/200 bullish cross (15m)</
 const apiBase = "https://fapi.binance.com";
 const tf = "15m";
 const candlesLimit = 200;
-const concurrency = 5; // safe concurrency limit
+const concurrency = 5; // safe concurrency
 
 function ema(values, period) {
   const k = 2 / (period + 1);
@@ -129,18 +132,22 @@ async function processSymbol(symObj) {
 async function startScan() {
   document.getElementById("results").innerHTML = "";
   const progress = document.getElementById("progress");
+  const countDisplay = document.getElementById("count");
+
   progress.innerText = "Fetching 24h green pairs...";
   
   const allSymbols = await getAllSymbols();
   const greenList = await getGreenSymbols();
   const greenSymbols = greenList.filter(g => allSymbols.includes(g.symbol));
 
-  progress.innerHTML = `<span class="warn">Found ${greenSymbols.length} green perpetual pairs.</span>`;
+  countDisplay.innerHTML = `🟢 Found <span class="ok">${greenSymbols.length}</span> green USDT perpetual pairs`;
+  progress.innerHTML = `<span class="warn">Stage 1 complete — showing all green pairs below...</span>`;
+  
   await displayGreenList(greenSymbols);
 
-  progress.innerHTML += `<br>Starting EMA70/200 bullish cross detection...`;
+  progress.innerHTML += `<br>Stage 2: Scanning EMA70/200 bullish crosses...`;
 
-  // --- Concurrent scanning (safe rate-limit) ---
+  // --- Safe concurrent scan ---
   let index = 0;
   const batch = async () => {
     const tasks = [];
