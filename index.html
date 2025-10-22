@@ -1,149 +1,195 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Binance Futures EMA70–EMA200 12h Cross Detector</title>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Binance Futures — Robust EMA70/EMA200 Cross Detector</title>
 <style>
-  body { font-family: Arial, sans-serif; background: #0d1117; color: #eee; text-align: center; }
-  h1 { color: #f1c40f; }
-  table { margin: 20px auto; border-collapse: collapse; width: 90%; }
-  th, td { padding: 8px 12px; border: 1px solid #333; }
-  tr:nth-child(even) { background: #1a1f29; }
-  tr:nth-child(odd) { background: #161b22; }
-  .ok { color: #00ff88; font-weight: bold; }
-  .warn { color: #ffcc00; }
-  #progress, #count { margin-top: 10px; font-weight: bold; }
+  body{font-family:Inter,Arial,Helvetica,sans-serif;background:#0d1117;color:#e6eef8}
+  h1{color:#f1c40f;text-align:center}
+  .meta{ text-align:center;margin-bottom:8px }
+  button{display:block;margin:8px auto;padding:8px 12px;border-radius:6px}
+  table{width:95%;margin:8px auto;border-collapse:collapse}
+  th,td{padding:8px;border:1px solid #23313b;text-align:center;font-size:13px}
+  tr:nth-child(even){background:#07121a}
+  .ok{color:#00ff88;font-weight:600}
+  .warn{color:#ffcc00}
+  #progress,#count,#found{ text-align:center;margin:6px 0;font-weight:600 }
+  .small{font-size:12px;color:#9fb0c6}
 </style>
 </head>
 <body>
-<h1>Binance Futures EMA70–EMA200 Bullish Cross (Last 12h)</h1>
-<p>Timeframe: 15m | Safe rate: 1 req/sec | Candles: 200</p>
-<button id="startBtn">Start Scan</button>
-<div id="progress"></div>
-<div id="count"></div>
+  <h1>Binance Futures — EMA70 > EMA200 Recent Cross (15m)</h1>
+  <div class="meta">
+    <div class="small">Timeframe: <strong>15m</strong> | Candles: <strong>200</strong> | Cross must be ≤ <strong>25</strong> candles ago and inside last <strong>96</strong> candles (prev+curr 12h windows)</div>
+  </div>
 
-<table>
-  <thead>
-    <tr>
-      <th>Pair</th>
-      <th>24h Change</th>
-      <th>EMA70</th>
-      <th>EMA200</th>
-      <th>Status</th>
-    </tr>
-  </thead>
-  <tbody id="results"></tbody>
-</table>
+  <button id="startBtn">Start Scan</button>
+  <div id="progress"></div>
+  <div id="count"></div>
+  <div id="found"></div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Pair</th>
+        <th>24h %</th>
+        <th>EMA70</th>
+        <th>EMA200</th>
+        <th>Candles Ago</th>
+        <th>Cross Time (UTC)</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody id="results"></tbody>
+  </table>
 
 <script>
-const apiBase = "https://fapi.binance.com";
-const tf = "15m";
-const candlesLimit = 200;
-const delayMs = 1000; // 1 request/sec safe rate
-const crossMaxAge = 25; // must be within 25 candles
-const crossWindow = 96; // previous 12h + current 12h = 48 + 48 = 96 candles
+const API_BASE = 'https://fapi.binance.com';
+const INTERVAL = '15m';
+const CANDLES = 200;
+const DELAY_MS = 1000;           // 1 req/sec safe
+const CROSS_MAX_AGE = 25;        // must be <= 25 candles ago
+const CROSS_WINDOW = 96;         // only search inside last 96 candles
 
-async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+// --- helpers ---
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+function toUTC(ts){ return new Date(ts).toISOString().replace('T',' ').replace('.000Z',' UTC'); }
 
-function ema(values, period) {
-  const k = 2 / (period + 1);
-  let emaArray = [values[0]];
-  for (let i = 1; i < values.length; i++) {
-    emaArray.push(values[i] * k + emaArray[i - 1] * (1 - k));
+// Robust EMA: returns array same length as values. Entries before first valid EMA -> null.
+// Seed first EMA at index (period-1) with SMA of first period values.
+function emaArray(values, period){
+  const out = new Array(values.length).fill(null);
+  if(values.length < period) return out;
+  // seed sma
+  let sum = 0;
+  for(let i=0;i<period;i++) sum += values[i];
+  let prev = sum / period;
+  out[period-1] = prev;
+  const k = 2/(period+1);
+  for(let i = period; i < values.length; i++){
+    prev = (values[i] - prev)*k + prev;
+    out[i] = prev;
   }
-  return emaArray;
+  return out;
 }
 
-async function fetchCandles(symbol) {
-  const url = `${apiBase}/fapi/v1/klines?symbol=${symbol}&interval=${tf}&limit=${candlesLimit}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Error fetching ${symbol}`);
+// fetch perpetual USDT symbols
+async function fetchPerpSymbols(){
+  const res = await fetch(`${API_BASE}/fapi/v1/exchangeInfo`);
+  if(!res.ok) throw new Error('exchangeInfo failed');
   const data = await res.json();
-  return data.map(c => parseFloat(c[4]));
+  return data.symbols.filter(s => s.contractType === 'PERPETUAL' && s.symbol.endsWith('USDT')).map(s=>s.symbol);
 }
 
-async function getAllSymbols() {
-  const res = await fetch(`${apiBase}/fapi/v1/exchangeInfo`);
-  const data = await res.json();
-  return data.symbols
-    .filter(s => s.contractType === "PERPETUAL" && s.symbol.endsWith("USDT"))
-    .map(s => s.symbol);
-}
-
-async function getGreenSymbols() {
-  const res = await fetch(`${apiBase}/fapi/v1/ticker/24hr`);
+// fetch 24hr tickers and return green (priceChangePercent>0) filtered & sorted desc
+async function fetchGreenTickers(){
+  const res = await fetch(`${API_BASE}/fapi/v1/ticker/24hr`);
+  if(!res.ok) throw new Error('ticker/24hr failed');
   const data = await res.json();
   return data
-    .filter(t => t.symbol.endsWith("USDT") && parseFloat(t.priceChangePercent) > 0)
-    .map(t => ({
-      symbol: t.symbol,
-      change: parseFloat(t.priceChangePercent)
-    }));
+    .filter(t => t.symbol.endsWith('USDT') && parseFloat(t.priceChangePercent) > 0)
+    .map(t => ({ symbol: t.symbol, change: parseFloat(t.priceChangePercent) }))
+    .sort((a,b)=>b.change - a.change);
 }
 
-// ✅ Detect EMA70 crossing above EMA200
-function findEma70Ema200Cross(ema70, ema200) {
-  for (let i = ema70.length - 1; i >= ema70.length - crossWindow; i--) {
-    if (i < 1) break;
-    const prevBear = ema70[i - 1] <= ema200[i - 1];
-    const nowBull = ema70[i] > ema200[i];
-    if (prevBear && nowBull) {
-      return i;
+// fetch candles (we need times too)
+async function fetchKlines(symbol){
+  const url = `${API_BASE}/fapi/v1/klines?symbol=${symbol}&interval=${INTERVAL}&limit=${CANDLES}`;
+  const res = await fetch(url);
+  if(!res.ok) throw new Error('klines failed for ' + symbol);
+  const data = await res.json();
+  // each row: [ openTime, open, high, low, close, ... ]
+  return data.map(r => ({ t: r[0], close: parseFloat(r[4]) }));
+}
+
+// find EMA70>EMA200 bullish cross index inside last CROSS_WINDOW candles
+// returns object { index, candlesAgo, timestamp } or null
+function findEma70AboveEma200Cross(ema70, ema200, klines){
+  const n = ema70.length;
+  const start = Math.max(1, n - CROSS_WINDOW); // ensure i-1 valid
+  for(let i = n-1; i >= start; i--){
+    const prev70 = ema70[i-1], prev200 = ema200[i-1];
+    const now70 = ema70[i], now200 = ema200[i];
+    if(prev70 == null || prev200 == null || now70 == null || now200 == null) continue;
+    // prev <= and now >
+    if(prev70 <= prev200 && now70 > now200){
+      const candlesAgo = n - 1 - i; // 0 means current candle, 1 means previous candle
+      return { index: i, candlesAgo, timestamp: klines[i].t };
     }
   }
-  return -1;
+  return null;
 }
 
-async function startScan() {
-  document.getElementById("results").innerHTML = "";
-  const progress = document.getElementById("progress");
-  const count = document.getElementById("count");
+// UI helpers
+function setProgress(text){ document.getElementById('progress').innerText = text; }
+function setCount(text){ document.getElementById('count').innerHTML = text; }
+function setFound(text){ document.getElementById('found').innerHTML = text; }
 
-  progress.innerText = "Fetching 24h green pairs...";
-  const allSymbols = await getAllSymbols();
-  const greenList = await getGreenSymbols();
-  const greenSymbols = greenList.filter(g => allSymbols.includes(g.symbol));
+document.getElementById('startBtn').addEventListener('click', async ()=>{
+  document.getElementById('results').innerHTML = '';
+  setProgress('Loading symbols & 24h tickers...');
+  try{
+    const [allSymbols, green] = await Promise.all([fetchPerpSymbols(), fetchGreenTickers()]);
+    // only keep green symbols that are listed perpetual USDT
+    const greenPerp = green.filter(g => allSymbols.includes(g.symbol));
+    setCount(`🟢 Green 24h pairs: <strong style="color:#00ff88">${greenPerp.length}</strong>`);
+    setFound('Found: 0');
+    if(greenPerp.length === 0){
+      setProgress('No green pairs found.');
+      return;
+    }
 
-  count.innerHTML = `🟢 Found <span class="ok">${greenSymbols.length}</span> green USDT perpetual pairs`;
-  progress.innerHTML = `<span class="warn">Starting EMA scan only for green pairs...</span>`;
+    let found = 0;
+    for(let i=0;i<greenPerp.length;i++){
+      const symObj = greenPerp[i];
+      setProgress(`Scanning ${i+1}/${greenPerp.length} — ${symObj.symbol}`);
+      try{
+        // fetch raw klines (with times)
+        const klines = await fetchKlines(symObj.symbol);
+        const closes = klines.map(k=>k.close);
+        const ema70 = emaArray(closes, 70);
+        const ema200 = emaArray(closes, 200);
 
-  let found = 0;
-  for (let i = 0; i < greenSymbols.length; i++) {
-    const { symbol, change } = greenSymbols[i];
-    progress.innerText = `Scanning ${i + 1}/${greenSymbols.length} - ${symbol}`;
+        const cross = findEma70AboveEma200Cross(ema70, ema200, klines);
+        if(cross && cross.candlesAgo <= CROSS_MAX_AGE){
+          found++;
+          // data for table
+          const e70 = ema70[ema70.length-1];
+          const e200 = ema200[ema200.length-1];
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td>${symObj.symbol}</td>
+            <td style="color:#00ff88">${symObj.change.toFixed(2)}%</td>
+            <td>${e70 ? e70.toFixed(6) : '-'}</td>
+            <td>${e200 ? e200.toFixed(6) : '-'}</td>
+            <td>${cross.candlesAgo}</td>
+            <td>${toUTC(cross.timestamp)}</td>
+            <td class="ok">✅ Cross (${cross.candlesAgo} candles ago)</td>
+          `;
+          document.getElementById('results').appendChild(row);
 
-    try {
-      const closes = await fetchCandles(symbol);
-      const ema70 = ema(closes, 70);
-      const ema200 = ema(closes, 200);
-
-      const crossIndex = findEma70Ema200Cross(ema70, ema200);
-
-      if (crossIndex !== -1 && ema70.length - crossIndex <= crossMaxAge) {
-        found++;
-        const e70 = ema70.at(-1);
-        const e200 = ema200.at(-1);
-
-        const row = `<tr>
-          <td>${symbol}</td>
-          <td style="color:#00ff88;">${change.toFixed(2)}%</td>
-          <td>${e70.toFixed(2)}</td>
-          <td>${e200.toFixed(2)}</td>
-          <td class="ok">✅ Bullish EMA70>EMA200 (${ema70.length - crossIndex} candles ago)</td>
-        </tr>`;
-        document.getElementById("results").insertAdjacentHTML("beforeend", row);
+          // console debug for verification
+          console.log('MATCH', symObj.symbol, {
+            crossIndex: cross.index,
+            candlesAgo: cross.candlesAgo,
+            timestampUTC: toUTC(cross.timestamp),
+            lastCloseTimeUTC: toUTC(klines[klines.length-1].t)
+          });
+        }
+      } catch(err){
+        console.warn('skip', symObj.symbol, err.message);
       }
-    } catch (e) {
-      console.warn("Error on", symbol, e.message);
+      // safe delay
+      await sleep(DELAY_MS);
+      setFound(`Found: ${found}`);
     }
-
-    await sleep(delayMs);
+    setProgress(`Scan complete. Found ${found} matching pairs.`);
+  }catch(err){
+    console.error(err);
+    setProgress('Error: '+err.message);
   }
-
-  progress.innerHTML = `<span class="ok">✅ Scan complete. Found ${found} pairs with EMA70>EMA200 cross (last 12h window, ≤25 candles ago).</span>`;
-}
-document.getElementById("startBtn").addEventListener("click", startScan);
+});
 </script>
 </body>
 </html>
