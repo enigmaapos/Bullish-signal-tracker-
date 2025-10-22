@@ -17,7 +17,7 @@
 </style>
 </head>
 <body>
-<h1>Binance Futures EMA14 > EMA70 > EMA200 Detector</h1>
+<h1>Binance Futures EMA Detector — Green Candle + Recent Bullish EMA70/EMA200 Cross</h1>
 <p>Timeframe: 15m | Safe rate: 1 request/sec | Candles: 200</p>
 <button id="startBtn">Start Scan</button>
 <div id="progress"></div>
@@ -38,7 +38,7 @@
 const apiBase = "https://fapi.binance.com";
 const tf = "15m";
 const candlesLimit = 200;
-const delayMs = 1000; // 1 request/sec = safe rate
+const delayMs = 1000; // safe rate
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -56,12 +56,26 @@ async function fetchCandles(symbol) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Error fetching ${symbol}`);
   const data = await res.json();
-  return data.map(c => parseFloat(c[4])); // closing prices
+  return data.map(c => ({
+    open: parseFloat(c[1]),
+    close: parseFloat(c[4])
+  }));
 }
 
 function isEmaRising(arr) {
   const len = arr.length;
   return arr[len - 1] > arr[len - 2];
+}
+
+function checkRecentBullishCross(ema70, ema200) {
+  const len = ema70.length;
+  const lookback = 25;
+  for (let i = len - lookback; i < len; i++) {
+    if (ema70[i - 1] < ema200[i - 1] && ema70[i] > ema200[i]) {
+      return true;
+    }
+  }
+  return false;
 }
 
 async function getAllSymbols() {
@@ -81,7 +95,17 @@ async function startScan() {
     const sym = allSymbols[i];
     progress.innerText = `Scanning ${i + 1}/${allSymbols.length} - ${sym}`;
     try {
-      const closes = await fetchCandles(sym);
+      const candles = await fetchCandles(sym);
+      const lastCandle = candles.at(-1);
+      const isGreen = lastCandle.close > lastCandle.open;
+
+      // Skip red candles for speed
+      if (!isGreen) {
+        await sleep(delayMs);
+        continue;
+      }
+
+      const closes = candles.map(c => c.close);
       const ema14 = ema(closes, 14);
       const ema70 = ema(closes, 70);
       const ema200 = ema(closes, 200);
@@ -90,7 +114,9 @@ async function startScan() {
       const e70 = ema70.at(-1);
       const e200 = ema200.at(-1);
 
-      const condition = e14 > e70 && e70 > e200 && isEmaRising(ema14);
+      const recentCross = checkRecentBullishCross(ema70, ema200);
+      const condition = recentCross && e14 > e70 && e70 > e200 && isEmaRising(ema14);
+
       if (condition) {
         found++;
         const row = `<tr>
@@ -98,16 +124,16 @@ async function startScan() {
           <td>${e14.toFixed(2)}</td>
           <td>${e70.toFixed(2)}</td>
           <td>${e200.toFixed(2)}</td>
-          <td class="ok">✅ Match</td>
+          <td class="ok">✅ Green + Recent Bullish Cross</td>
         </tr>`;
         document.getElementById("results").insertAdjacentHTML("beforeend", row);
       }
     } catch (e) {
       console.warn("Error on", sym, e.message);
     }
-    await sleep(delayMs); // respect rate limit
+    await sleep(delayMs);
   }
-  progress.innerHTML = `<span class="warn">Scan complete. Found ${found} matching pairs ✅</span>`;
+  progress.innerHTML = `<span class="warn">Scan complete. Found ${found} pairs with green candles and recent bullish crosses ✅</span>`;
 }
 
 document.getElementById("startBtn").addEventListener("click", startScan);
