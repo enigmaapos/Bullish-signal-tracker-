@@ -5,48 +5,180 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Binance Futures EMA Cross Detector</title>
 <style>
-  body { font-family: Arial, sans-serif; background: #0d1117; color: #eee; text-align: center; }
-  h1 { color: #f1c40f; margin-bottom: 10px; }
-  p { color: #ccc; margin-top: 0; }
-  table { margin: 20px auto; border-collapse: collapse; width: 95%; }
-  th, td { padding: 8px 12px; border: 1px solid #333; font-size: 13px; }
-  tr:nth-child(even) { background: #1a1f29; }
-  tr:nth-child(odd) { background: #161b22; }
-  .ok { color: #00ff88; font-weight: bold; }
-  .bear { color: #ff5555; font-weight: bold; }
-  .warn { color: #ffcc00; }
-  button { background: #f1c40f; color: #000; padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin: 5px; }
-  button:disabled { background: #555; color: #999; cursor: not-allowed; }
-  #progress, #count { margin-top: 10px; font-weight: bold; }
+  :root {
+    --bg: #0e1117;
+    --card: #161b22;
+    --border: #2b313b;
+    --accent: #f1c40f;
+    --bull: #00ff88;
+    --bear: #ff5555;
+  }
+
+  body {
+    margin: 0;
+    font-family: "Segoe UI", Arial, sans-serif;
+    background: var(--bg);
+    color: #e0e0e0;
+  }
+
+  h1 {
+    color: var(--accent);
+    margin: 20px 0 5px;
+    text-align: center;
+  }
+
+  p {
+    text-align: center;
+    color: #aaa;
+    margin: 0 0 20px;
+  }
+
+  .controls {
+    text-align: center;
+    margin-bottom: 10px;
+  }
+
+  button {
+    background: var(--accent);
+    color: #000;
+    font-weight: bold;
+    padding: 10px 18px;
+    margin: 5px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  button:hover:not(:disabled) {
+    transform: scale(1.03);
+    box-shadow: 0 0 8px var(--accent);
+  }
+
+  button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .dashboard {
+    max-width: 1200px;
+    margin: auto;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 0 15px rgba(0,0,0,0.4);
+  }
+
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-around;
+    margin: 15px 0;
+  }
+
+  .stat-box {
+    background: #1b222d;
+    border-radius: 10px;
+    padding: 10px 20px;
+    margin: 5px;
+    text-align: center;
+    min-width: 130px;
+  }
+
+  .stat-box span {
+    display: block;
+    font-size: 24px;
+    font-weight: bold;
+  }
+
+  #progress-container {
+    width: 100%;
+    height: 10px;
+    background: #2b2b2b;
+    border-radius: 6px;
+    overflow: hidden;
+    margin: 15px 0;
+  }
+
+  #progress-bar {
+    width: 0%;
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.3s;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+  }
+
+  th, td {
+    padding: 8px;
+    border-bottom: 1px solid #2b2b2b;
+    text-align: center;
+    font-size: 13px;
+  }
+
+  th {
+    color: var(--accent);
+    background: #1e2530;
+  }
+
+  tr:nth-child(even) { background: #141a22; }
+  tr:nth-child(odd) { background: #10151c; }
+
+  .ok { color: var(--bull); font-weight: bold; }
+  .bear { color: var(--bear); font-weight: bold; }
+
+  @media (max-width: 700px) {
+    table { font-size: 12px; }
+    th, td { padding: 6px; }
+  }
 </style>
 </head>
 <body>
-<h1>Binance Futures EMA Cross Detector</h1>
-<p>Timeframe: 15m | Safe: 5 pairs/sec | Candles: 200 | Cooldown: 30s</p>
+  <h1>Binance Futures EMA Cross Detector</h1>
+  <p>Timeframe: 15m • Safe: 5 pairs/sec • Candles: 200 • Cooldown: 30s</p>
 
-<div>
-  <button id="greenBullish">🟢 Green Bullish</button>
-  <button id="redBullish">🔴 Red Bullish</button>
-  <button id="greenBearish">🟢 Green Bearish</button>
-  <button id="redBearish">🔴 Red Bearish</button>
-</div>
+  <div class="controls">
+    <button id="greenBullish">🟢 Green Bullish</button>
+    <button id="redBullish">🔴 Red Bullish</button>
+    <button id="greenBearish">🟢 Green Bearish</button>
+    <button id="redBearish">🔴 Red Bearish</button>
+  </div>
 
-<div id="progress"></div>
-<div id="count"></div>
+  <div class="dashboard">
+    <div class="stats">
+      <div class="stat-box" style="color:var(--bull)">
+        Green Pairs <span id="greenCount">-</span>
+      </div>
+      <div class="stat-box" style="color:var(--bear)">
+        Red Pairs <span id="redCount">-</span>
+      </div>
+      <div class="stat-box" style="color:var(--accent)">
+        Found Crosses <span id="foundCount">0</span>
+      </div>
+    </div>
 
-<table>
-  <thead>
-    <tr>
-      <th>Pair</th>
-      <th>24h Change %</th>
-      <th>EMA14</th>
-      <th>EMA70</th>
-      <th>EMA200</th>
-      <th>Status</th>
-    </tr>
-  </thead>
-  <tbody id="results"></tbody>
-</table>
+    <div id="progress-container"><div id="progress-bar"></div></div>
+    <div id="progressText" style="text-align:center; margin-bottom:10px;"></div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Pair</th>
+          <th>24h Change %</th>
+          <th>EMA14</th>
+          <th>EMA70</th>
+          <th>EMA200</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="results"></tbody>
+    </table>
+  </div>
 
 <script>
 const apiBase = "https://fapi.binance.com";
@@ -56,6 +188,7 @@ const concurrency = 5;
 const delayMs = 1000;
 const recentLimit = 25;
 const cooldownMs = 30000;
+
 let isScanning = false;
 let lastScanTime = 0;
 
@@ -69,7 +202,6 @@ function ema(values, period){
   return emaArr;
 }
 
-// Detect bullish cross (EMA70 crosses ABOVE EMA200)
 function findBullishCross(ema70, ema200){
   for(let i=1;i<ema70.length;i++){
     if(ema70[i-1]<ema200[i-1] && ema70[i]>=ema200[i]) return i;
@@ -77,7 +209,6 @@ function findBullishCross(ema70, ema200){
   return -1;
 }
 
-// Detect bearish cross (EMA70 crosses BELOW EMA200)
 function findBearishCross(ema70, ema200){
   for(let i=1;i<ema70.length;i++){
     if(ema70[i-1]>ema200[i-1] && ema70[i]<=ema200[i]) return i;
@@ -86,19 +217,9 @@ function findBearishCross(ema70, ema200){
 }
 
 async function fetchCandles(symbol){
-  const url = `${apiBase}/fapi/v1/klines?symbol=${symbol}&interval=${tf}&limit=${candlesLimit}`;
-  const res = await fetch(url);
-  if(!res.ok) throw new Error(`HTTP ${res.status}`);
+  const res = await fetch(`${apiBase}/fapi/v1/klines?symbol=${symbol}&interval=${tf}&limit=${candlesLimit}`);
   const data = await res.json();
   return data.map(c=>parseFloat(c[4]));
-}
-
-async function getAllSymbols(){
-  const res = await fetch(`${apiBase}/fapi/v1/exchangeInfo`);
-  const data = await res.json();
-  return data.symbols
-    .filter(s=>s.contractType==="PERPETUAL" && s.symbol.endsWith("USDT"))
-    .map(s=>s.symbol);
 }
 
 async function get24hSymbols(){
@@ -108,6 +229,14 @@ async function get24hSymbols(){
     symbol: t.symbol,
     change: parseFloat(t.priceChangePercent)
   }));
+}
+
+async function preloadCounts(){
+  const tickers = await get24hSymbols();
+  const greens = tickers.filter(t=>t.change>0 && t.symbol.endsWith("USDT")).length;
+  const reds = tickers.filter(t=>t.change<0 && t.symbol.endsWith("USDT")).length;
+  document.getElementById("greenCount").textContent = greens;
+  document.getElementById("redCount").textContent = reds;
 }
 
 async function processSymbol({symbol, change}, mode){
@@ -130,82 +259,82 @@ async function processSymbol({symbol, change}, mode){
     if(!valid) return null;
 
     return {
-      symbol,
-      change,
+      symbol, change,
       e14: ema14[last].toFixed(2),
       e70: ema70[last].toFixed(2),
       e200: ema200[last].toFixed(2),
-      barsAgo,
-      mode
+      barsAgo, mode
     };
-  }catch(e){
-    console.warn("Error:", symbol, e.message);
-    return null;
-  }
+  }catch{return null;}
 }
 
 async function startScan(mode){
-  if(isScanning){
-    alert("⚠️ A scan is already running. Please wait.");
-    return;
-  }
+  if(isScanning) return alert("⚠️ Scan in progress. Wait.");
   const now = Date.now();
-  if(now-lastScanTime<cooldownMs){
-    alert(`⏳ Please wait ${(cooldownMs-(now-lastScanTime))/1000|0}s before rescanning.`);
-    return;
+  if(now - lastScanTime < cooldownMs){
+    return alert(`⏳ Wait ${(cooldownMs - (now - lastScanTime))/1000|0}s.`);
   }
-  lastScanTime = now;
+
   isScanning = true;
+  lastScanTime = now;
+  disableButtons(true);
+  updateProgress(0);
 
-  const progress = document.getElementById("progress");
-  const count = document.getElementById("count");
-  const results = document.getElementById("results");
-  results.innerHTML = "";
-  progress.innerText = "Fetching symbols...";
-  count.innerText = "";
+  const resultsEl = document.getElementById("results");
+  resultsEl.innerHTML = "";
+  document.getElementById("foundCount").textContent = 0;
+  const txt = document.getElementById("progressText");
+  txt.textContent = "Fetching pairs...";
 
-  const [allSymbols, tickers] = await Promise.all([getAllSymbols(), get24hSymbols()]);
+  const tickers = await get24hSymbols();
   const filtered = tickers.filter(t=>{
-    if(!allSymbols.includes(t.symbol) || !t.symbol.endsWith("USDT")) return false;
+    if(!t.symbol.endsWith("USDT")) return false;
     if(mode.includes("green")) return t.change>0;
     if(mode.includes("red")) return t.change<0;
     return false;
   });
 
-  count.innerHTML = `${mode.includes("green")?"🟢":"🔴"} Found <span class="ok">${filtered.length}</span> matching pairs`;
-  progress.innerText = "Scanning EMA crosses...";
+  txt.textContent = `Scanning ${filtered.length} pairs...`;
 
-  let found=0, index=0;
-  while(index<filtered.length){
-    const batch = filtered.slice(index, index+concurrency);
-    const batchResults = await Promise.all(batch.map(s=>processSymbol(s,mode)));
-    batchResults.forEach(r=>{
+  let found = 0;
+  for(let i=0;i<filtered.length;i+=concurrency){
+    const batch = filtered.slice(i,i+concurrency);
+    const res = await Promise.all(batch.map(s=>processSymbol(s,mode)));
+    res.forEach(r=>{
       if(!r) return;
       found++;
-      const isBull = r.mode.includes("bullish");
+      document.getElementById("foundCount").textContent = found;
       const row = `<tr>
         <td>${r.symbol}</td>
-        <td style="color:${r.change>0?"#00ff88":"#ff5555"};">${r.change.toFixed(2)}%</td>
-        <td>${r.e14}</td>
-        <td>${r.e70}</td>
-        <td>${r.e200}</td>
-        <td class="${isBull?'ok':'bear'}">${isBull?'✅ Bullish':'⚠️ Bearish'} Cross (${r.barsAgo} candles ago)</td>
+        <td style="color:${r.change>0?"#00ff88":"#ff5555"}">${r.change.toFixed(2)}%</td>
+        <td>${r.e14}</td><td>${r.e70}</td><td>${r.e200}</td>
+        <td class="${r.mode.includes("bullish")?'ok':'bear'}">${r.mode.includes("bullish")?'✅ Bullish':'⚠️ Bearish'} (${r.barsAgo} candles ago)</td>
       </tr>`;
-      results.insertAdjacentHTML("beforeend",row);
+      resultsEl.insertAdjacentHTML("beforeend", row);
     });
-    index+=concurrency;
-    progress.innerText = `Progress: ${Math.min(index, filtered.length)}/${filtered.length}`;
+    updateProgress((i+concurrency)/filtered.length*100);
     await sleep(delayMs);
   }
 
-  progress.innerHTML = `<span class="ok">✅ Scan complete. Found ${found} ${mode.includes("bullish")?'bullish':'bearish'} crosses.</span>`;
+  txt.textContent = `✅ Completed. Found ${found} crosses.`;
+  disableButtons(false);
   isScanning=false;
+}
+
+function disableButtons(state){
+  document.querySelectorAll("button").forEach(btn=>btn.disabled=state);
+}
+
+function updateProgress(percent){
+  document.getElementById("progress-bar").style.width = `${Math.min(100,percent)}%`;
 }
 
 document.getElementById("greenBullish").onclick=()=>startScan("green_bullish");
 document.getElementById("redBullish").onclick=()=>startScan("red_bullish");
 document.getElementById("greenBearish").onclick=()=>startScan("green_bearish");
 document.getElementById("redBearish").onclick=()=>startScan("red_bearish");
+
+preloadCounts();
 </script>
 </body>
 </html>
