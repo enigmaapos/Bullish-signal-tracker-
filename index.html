@@ -1,122 +1,136 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Binance Futures EMA14 > EMA70 > EMA200 Detector</title>
-  <style>
-    body { font-family: Arial; background: #0b0b0b; color: #f1f1f1; }
-    h2 { color: #00ffae; }
-    button { padding: 10px 20px; margin: 10px 0; }
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    th, td { border: 1px solid #333; padding: 6px; text-align: center; }
-    .bullish { color: #00ff66; }
-    .neutral { color: #ccc; }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Binance Futures EMA14 > EMA70 > EMA200 Detector</title>
+<style>
+  body { font-family: Arial, sans-serif; background: #0d1117; color: #eee; text-align: center; }
+  h1 { color: #f1c40f; }
+  table { margin: 20px auto; border-collapse: collapse; width: 90%; }
+  th, td { padding: 8px 12px; border: 1px solid #333; }
+  tr:nth-child(even) { background: #1a1f29; }
+  tr:nth-child(odd) { background: #161b22; }
+  .ok { color: #00ff88; font-weight: bold; }
+  .warn { color: #ffcc00; }
+  #progress, #count { margin-top: 10px; font-weight: bold; }
+</style>
 </head>
 <body>
-  <h2>Binance Futures EMA14 > EMA70 > EMA200 Detector</h2>
-  <p>Timeframe: 15m | Safe rate: 1 req/sec | Candles: 200</p>
+<h1>Binance Futures EMA14 > EMA70 > EMA200 Detector</h1>
+<p>Timeframe: 15m | Safe rate: 1 request/sec | Candles: 200</p>
+<button id="startBtn">Start Scan</button>
+<div id="progress"></div>
+<div id="count"></div>
 
-  <button onclick="startScan()">Start Scan</button>
-  <p id="progress"></p>
-  <p id="greenCount"></p>
+<table>
+  <thead>
+    <tr>
+      <th>Pair</th>
+      <th>24h Change</th>
+      <th>EMA14</th>
+      <th>EMA70</th>
+      <th>EMA200</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody id="results"></tbody>
+</table>
 
-  <table id="results">
-    <thead>
-      <tr>
-        <th>Pair</th>
-        <th>EMA14</th>
-        <th>EMA70</th>
-        <th>EMA200</th>
-        <th>Status</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+<script>
+const apiBase = "https://fapi.binance.com";
+const tf = "15m";
+const candlesLimit = 200;
+const delayMs = 1000; // safe rate
 
-  <script>
-    const API_BASE = "https://fapi.binance.com";
+async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-    async function fetchSymbols() {
-      const res = await fetch(`${API_BASE}/fapi/v1/exchangeInfo`);
-      const data = await res.json();
-      return data.symbols
-        .filter(s => s.contractType === "PERPETUAL" && s.quoteAsset === "USDT")
-        .map(s => s.symbol);
-    }
+function ema(values, period) {
+  const k = 2 / (period + 1);
+  let emaArray = [values[0]];
+  for (let i = 1; i < values.length; i++) {
+    emaArray.push(values[i] * k + emaArray[i - 1] * (1 - k));
+  }
+  return emaArray;
+}
 
-    async function fetch24h(symbol) {
-      const res = await fetch(`${API_BASE}/fapi/v1/ticker/24hr?symbol=${symbol}`);
-      return await res.json();
-    }
+async function fetchCandles(symbol) {
+  const url = `${apiBase}/fapi/v1/klines?symbol=${symbol}&interval=${tf}&limit=${candlesLimit}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Error fetching ${symbol}`);
+  const data = await res.json();
+  return data.map(c => parseFloat(c[4]));
+}
 
-    function calcEMA(values, period) {
-      const k = 2 / (period + 1);
-      let ema = values[0];
-      for (let i = 1; i < values.length; i++) {
-        ema = values[i] * k + ema * (1 - k);
+async function getAllSymbols() {
+  const res = await fetch(`${apiBase}/fapi/v1/exchangeInfo`);
+  const data = await res.json();
+  return data.symbols
+    .filter(s => s.contractType === "PERPETUAL" && s.symbol.endsWith("USDT"))
+    .map(s => s.symbol);
+}
+
+async function getGreenSymbols() {
+  const res = await fetch(`${apiBase}/fapi/v1/ticker/24hr`);
+  const data = await res.json();
+  return data
+    .filter(t => t.symbol.endsWith("USDT") && parseFloat(t.priceChangePercent) > 0)
+    .map(t => ({
+      symbol: t.symbol,
+      change: parseFloat(t.priceChangePercent)
+    }));
+}
+
+async function startScan() {
+  document.getElementById("results").innerHTML = "";
+  const progress = document.getElementById("progress");
+  const count = document.getElementById("count");
+
+  progress.innerText = "Fetching 24h green pairs...";
+  const allSymbols = await getAllSymbols();
+  const greenList = await getGreenSymbols();
+  const greenSymbols = greenList.filter(g => allSymbols.includes(g.symbol));
+
+  count.innerHTML = `🟢 Found <span class="ok">${greenSymbols.length}</span> green USDT perpetual pairs`;
+  progress.innerHTML = `<span class="warn">Starting EMA scan only for green pairs...</span>`;
+
+  let found = 0;
+  for (let i = 0; i < greenSymbols.length; i++) {
+    const { symbol, change } = greenSymbols[i];
+    progress.innerText = `Scanning ${i + 1}/${greenSymbols.length} - ${symbol}`;
+
+    try {
+      const closes = await fetchCandles(symbol);
+      const ema14 = ema(closes, 14);
+      const ema70 = ema(closes, 70);
+      const ema200 = ema(closes, 200);
+
+      const e14 = ema14.at(-1);
+      const e70 = ema70.at(-1);
+      const e200 = ema200.at(-1);
+
+      if (e14 > e70 && e70 > e200) {
+        found++;
+        const row = `<tr>
+          <td>${symbol}</td>
+          <td style="color:#00ff88;">${change.toFixed(2)}%</td>
+          <td>${e14.toFixed(2)}</td>
+          <td>${e70.toFixed(2)}</td>
+          <td>${e200.toFixed(2)}</td>
+          <td class="ok">✅ EMA14 > EMA70 > EMA200</td>
+        </tr>`;
+        document.getElementById("results").insertAdjacentHTML("beforeend", row);
       }
-      return ema;
+    } catch (e) {
+      console.warn("Error on", symbol, e.message);
     }
 
-    async function fetchCandles(symbol) {
-      const url = `${API_BASE}/fapi/v1/klines?symbol=${symbol}&interval=15m&limit=200`;
-      const res = await fetch(url);
-      const data = await res.json();
-      return data.map(c => parseFloat(c[4])); // close prices
-    }
+    await sleep(delayMs);
+  }
 
-    async function startScan() {
-      document.querySelector("#results tbody").innerHTML = "";
-      document.querySelector("#progress").textContent = "Loading symbols...";
-      document.querySelector("#greenCount").textContent = "";
-
-      const symbols = await fetchSymbols();
-      let greenCount = 0;
-      let scanned = 0;
-
-      for (const symbol of symbols) {
-        scanned++;
-        document.querySelector("#progress").textContent =
-          `Scanning ${scanned}/${symbols.length} - ${symbol}`;
-
-        const info = await fetch24h(symbol);
-        const change = parseFloat(info.priceChangePercent);
-        if (change > 0) greenCount++;
-
-        document.querySelector("#greenCount").textContent =
-          `✅ Green 24h Pairs: ${greenCount}/${symbols.length}`;
-
-        if (change > 0) {
-          const closes = await fetchCandles(symbol);
-          const ema14 = calcEMA(closes, 14);
-          const ema70 = calcEMA(closes, 70);
-          const ema200 = calcEMA(closes, 200);
-
-          let status = "Neutral";
-          let color = "neutral";
-          if (ema14 > ema70 && ema70 > ema200) {
-            status = "Bullish";
-            color = "bullish";
-          }
-
-          const row = `
-            <tr class="${color}">
-              <td>${symbol}</td>
-              <td>${ema14.toFixed(2)}</td>
-              <td>${ema70.toFixed(2)}</td>
-              <td>${ema200.toFixed(2)}</td>
-              <td>${status}</td>
-            </tr>`;
-          document.querySelector("#results tbody").insertAdjacentHTML("beforeend", row);
-        }
-
-        await new Promise(r => setTimeout(r, 1000)); // Safe 1 req/sec
-      }
-
-      document.querySelector("#progress").textContent =
-        `✅ Scan complete (${scanned} pairs scanned).`;
-    }
-  </script>
+  progress.innerHTML = `<span class="ok">✅ Scan complete. Found ${found} pairs matching EMA14>EMA70>EMA200.</span>`;
+}
+document.getElementById("startBtn").addEventListener("click", startScan);
+</script>
 </body>
 </html>
