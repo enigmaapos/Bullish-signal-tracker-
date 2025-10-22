@@ -258,6 +258,31 @@ async function processSymbol({symbol, change}, mode){
       : (ema14[last]<ema70[last] && ema70[last]<ema200[last]);
     if(!valid) return null;
 
+    // ✅ Detect recovery wick between EMA70 & EMA200 without closing on the wrong side
+let recovered = false;
+
+for (let i = crossIdx; i < ema70.length; i++) {
+  const price = closes[i]; // candle close price at index i
+
+  if (isBullish) {
+    // Bullish: wick dipped below EMA200 but closed above
+    const candleLow = Math.min(closes[i], ema70[i]); // you can replace with real low if available
+    if (candleLow < ema200[i] && closes[i] > ema200[i]) {
+      recovered = true;
+      break;
+    }
+  } else {
+    // Bearish: wick spiked above EMA200 but closed below
+    const candleHigh = Math.max(closes[i], ema70[i]); // you can replace with real high if available
+    if (candleHigh > ema200[i] && closes[i] < ema200[i]) {
+      recovered = true;
+      break;
+    }
+  }
+}
+
+if (!recovered) return null; // ignore if no recovery wick found
+
     return {
       symbol, change,
       e14: ema14[last].toFixed(2),
