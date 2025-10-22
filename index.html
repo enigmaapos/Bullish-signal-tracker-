@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Binance Futures EMA Detector (Fast)</title>
+<title>Fast Binance Futures EMA Cross Detector</title>
 <style>
   body { font-family: Arial, sans-serif; background: #0d1117; color: #eee; text-align: center; }
   h1 { color: #f1c40f; }
@@ -17,8 +17,8 @@
 </style>
 </head>
 <body>
-<h1>Binance Futures EMA Detector — 24h Green + Recent Bullish EMA70/200 Cross</h1>
-<p>Timeframe: 15m | Safe rate: 1 request/sec | Candles: 200</p>
+<h1>Binance Futures EMA Detector — Green 24h + Bullish EMA70/200 Cross</h1>
+<p>Timeframe: 15m | Candles: 200 | Concurrency: 5</p>
 <button id="startBtn">Start Scan</button>
 <div id="progress"></div>
 <table>
@@ -26,7 +26,6 @@
     <tr>
       <th>Pair</th>
       <th>24h Change</th>
-      <th>EMA14</th>
       <th>EMA70</th>
       <th>EMA200</th>
       <th>Status</th>
@@ -39,9 +38,7 @@
 const apiBase = "https://fapi.binance.com";
 const tf = "15m";
 const candlesLimit = 200;
-const delayMs = 1000; // safe rate 1 req/sec
-
-async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+const concurrency = 5; // safe concurrency limit
 
 function ema(values, period) {
   const k = 2 / (period + 1);
@@ -50,11 +47,6 @@ function ema(values, period) {
     emaArray.push(values[i] * k + emaArray[i - 1] * (1 - k));
   }
   return emaArray;
-}
-
-function isEmaRising(arr) {
-  const len = arr.length;
-  return arr[len - 1] > arr[len - 2];
 }
 
 function checkRecentBullishCross(ema70, ema200) {
@@ -66,7 +58,14 @@ function checkRecentBullishCross(ema70, ema200) {
   return false;
 }
 
-// ---- Phase 1: Get all perpetual USDT pairs ----
+async function fetchCandles(symbol) {
+  const url = `${apiBase}/fapi/v1/klines?symbol=${symbol}&interval=${tf}&limit=${candlesLimit}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Error fetching ${symbol}`);
+  const data = await res.json();
+  return data.map(c => parseFloat(c[4]));
+}
+
 async function getAllSymbols() {
   const res = await fetch(`${apiBase}/fapi/v1/exchangeInfo`);
   const data = await res.json();
@@ -75,7 +74,6 @@ async function getAllSymbols() {
     .map(s => s.symbol);
 }
 
-// ---- Phase 1: Get 24h tickers and filter green ----
 async function getGreenSymbols() {
   const res = await fetch(`${apiBase}/fapi/v1/ticker/24hr`);
   const data = await res.json();
@@ -87,62 +85,55 @@ async function getGreenSymbols() {
     }));
 }
 
-// ---- Phase 2: Fetch 15m candles and detect EMA cross ----
-async function fetchCandles(symbol) {
-  const url = `${apiBase}/fapi/v1/klines?symbol=${symbol}&interval=${tf}&limit=${candlesLimit}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Error fetching ${symbol}`);
-  const data = await res.json();
-  return data.map(c => parseFloat(c[4]));
+async function processSymbol(symObj) {
+  const { symbol, change } = symObj;
+  try {
+    const closes = await fetchCandles(symbol);
+    const ema70 = ema(closes, 70);
+    const ema200 = ema(closes, 200);
+    const e70 = ema70.at(-1);
+    const e200 = ema200.at(-1);
+
+    const recentCross = checkRecentBullishCross(ema70, ema200);
+    if (recentCross && e70 > e200) {
+      const row = `<tr>
+        <td>${symbol}</td>
+        <td style="color:#00ff88;">${change.toFixed(2)}%</td>
+        <td>${e70.toFixed(2)}</td>
+        <td>${e200.toFixed(2)}</td>
+        <td class="ok">✅ Recent Bullish Cross</td>
+      </tr>`;
+      document.getElementById("results").insertAdjacentHTML("beforeend", row);
+    }
+  } catch (err) {
+    console.warn("Error on", symbol, err.message);
+  }
 }
 
 async function startScan() {
   document.getElementById("results").innerHTML = "";
   const progress = document.getElementById("progress");
-  progress.innerText = "Fetching 24h green pairs...";
 
+  progress.innerText = "Fetching 24h ticker data...";
   const allSymbols = await getAllSymbols();
-  const tickers = await getGreenSymbols();
+  const greenList = await getGreenSymbols();
 
-  // Filter only green perpetual symbols
-  const greenSymbols = tickers.filter(t => allSymbols.includes(t.symbol));
-  progress.innerText = `Found ${greenSymbols.length} green USDT perpetual pairs. Scanning EMA crosses...`;
+  const greenSymbols = greenList.filter(g => allSymbols.includes(g.symbol));
+  progress.innerHTML = `<span class="warn">Found ${greenSymbols.length} green USDT perpetual pairs. Starting EMA scan...</span>`;
 
-  let found = 0;
-  for (let i = 0; i < greenSymbols.length; i++) {
-    const { symbol, change } = greenSymbols[i];
-    progress.innerText = `Scanning ${i + 1}/${greenSymbols.length} - ${symbol}`;
-    try {
-      const closes = await fetchCandles(symbol);
-      const ema14 = ema(closes, 14);
-      const ema70 = ema(closes, 70);
-      const ema200 = ema(closes, 200);
-
-      const e14 = ema14.at(-1);
-      const e70 = ema70.at(-1);
-      const e200 = ema200.at(-1);
-
-      const recentCross = checkRecentBullishCross(ema70, ema200);
-      const condition = recentCross && e14 > e70 && e70 > e200 && isEmaRising(ema14);
-
-      if (condition) {
-        found++;
-        const row = `<tr>
-          <td>${symbol}</td>
-          <td style="color:#00ff88;">${change.toFixed(2)}%</td>
-          <td>${e14.toFixed(2)}</td>
-          <td>${e70.toFixed(2)}</td>
-          <td>${e200.toFixed(2)}</td>
-          <td class="ok">✅ Green + Recent Bullish Cross</td>
-        </tr>`;
-        document.getElementById("results").insertAdjacentHTML("beforeend", row);
-      }
-    } catch (e) {
-      console.warn("Error on", symbol, e.message);
+  // --- Concurrent scanning (5 at a time) ---
+  let index = 0;
+  const batch = async () => {
+    const tasks = [];
+    for (let i = 0; i < concurrency && index < greenSymbols.length; i++, index++) {
+      tasks.push(processSymbol(greenSymbols[index]));
     }
-    await sleep(delayMs); // safe delay for Binance API
-  }
-  progress.innerHTML = `<span class="warn">✅ Scan complete. Found ${found} pairs with green price and recent EMA70/200 bullish crosses.</span>`;
+    await Promise.all(tasks);
+    if (index < greenSymbols.length) await batch();
+  };
+
+  await batch();
+  progress.innerHTML += `<br><span class="ok">✅ Scan complete.</span>`;
 }
 
 document.getElementById("startBtn").addEventListener("click", startScan);
