@@ -1,47 +1,9 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Binance Futures EMA14 > EMA70 > EMA200 Detector</title>
-<style>
-  body { font-family: Arial, sans-serif; background: #0d1117; color: #eee; text-align: center; }
-  h1 { color: #f1c40f; }
-  table { margin: 20px auto; border-collapse: collapse; width: 90%; }
-  th, td { padding: 8px 12px; border: 1px solid #333; }
-  tr:nth-child(even) { background: #1a1f29; }
-  tr:nth-child(odd) { background: #161b22; }
-  .ok { color: #00ff88; font-weight: bold; }
-  .warn { color: #ffcc00; }
-  #progress, #count { margin-top: 10px; font-weight: bold; }
-</style>
-</head>
-<body>
-<h1>Binance Futures EMA14 > EMA70 > EMA200 Detector</h1>
-<p>Timeframe: 15m | Safe rate: 1 request/sec | Candles: 200</p>
-<button id="startBtn">Start Scan</button>
-<div id="progress"></div>
-<div id="count"></div>
-
-<table>
-  <thead>
-    <tr>
-      <th>Pair</th>
-      <th>24h Change</th>
-      <th>EMA14</th>
-      <th>EMA70</th>
-      <th>EMA200</th>
-      <th>Status</th>
-    </tr>
-  </thead>
-  <tbody id="results"></tbody>
-</table>
-
 <script>
 const apiBase = "https://fapi.binance.com";
 const tf = "15m";
 const candlesLimit = 200;
 const delayMs = 1000; // safe rate
+const recentCandleLimit = 25; // ✅ crossing must be within 25 candles
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -81,6 +43,19 @@ async function getGreenSymbols() {
     }));
 }
 
+// ✅ Find where EMA14>EMA70>EMA200 started
+function findRecentCrossIndex(ema14, ema70, ema200) {
+  for (let i = ema14.length - 1; i >= 1; i--) {
+    const isBull = ema14[i] > ema70[i] && ema70[i] > ema200[i];
+    const wasBull = ema14[i - 1] > ema70[i - 1] && ema70[i - 1] > ema200[i - 1];
+    // Find the first time it *turned* bullish
+    if (isBull && !wasBull) {
+      return i; // index of crossing
+    }
+  }
+  return -1; // never crossed
+}
+
 async function startScan() {
   document.getElementById("results").innerHTML = "";
   const progress = document.getElementById("progress");
@@ -105,19 +80,22 @@ async function startScan() {
       const ema70 = ema(closes, 70);
       const ema200 = ema(closes, 200);
 
-      const e14 = ema14.at(-1);
-      const e70 = ema70.at(-1);
-      const e200 = ema200.at(-1);
+      const crossIndex = findRecentCrossIndex(ema14, ema70, ema200);
 
-      if (e14 > e70 && e70 > e200) {
+      if (crossIndex !== -1 && ema14.length - crossIndex <= recentCandleLimit) {
+        // ✅ Recent bullish crossing within last 25 candles
         found++;
+        const e14 = ema14.at(-1);
+        const e70 = ema70.at(-1);
+        const e200 = ema200.at(-1);
+
         const row = `<tr>
           <td>${symbol}</td>
           <td style="color:#00ff88;">${change.toFixed(2)}%</td>
           <td>${e14.toFixed(2)}</td>
           <td>${e70.toFixed(2)}</td>
           <td>${e200.toFixed(2)}</td>
-          <td class="ok">✅ EMA14 > EMA70 > EMA200</td>
+          <td class="ok">✅ New Bullish Cross (${ema14.length - crossIndex} candles ago)</td>
         </tr>`;
         document.getElementById("results").insertAdjacentHTML("beforeend", row);
       }
@@ -128,9 +106,7 @@ async function startScan() {
     await sleep(delayMs);
   }
 
-  progress.innerHTML = `<span class="ok">✅ Scan complete. Found ${found} pairs matching EMA14>EMA70>EMA200.</span>`;
+  progress.innerHTML = `<span class="ok">✅ Scan complete. Found ${found} pairs with recent (≤25) EMA cross.</span>`;
 }
 document.getElementById("startBtn").addEventListener("click", startScan);
 </script>
-</body>
-</html>
