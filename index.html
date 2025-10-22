@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Binance Futures EMA14 > EMA70 > EMA200 Detector</title>
+<title>Binance Futures EMA14 > EMA70 > EMA200 Detector (Recent Cross)</title>
 <style>
   body { font-family: Arial, sans-serif; background: #0d1117; color: #eee; text-align: center; }
   h1 { color: #f1c40f; }
@@ -13,15 +13,16 @@
   tr:nth-child(odd) { background: #161b22; }
   .ok { color: #00ff88; font-weight: bold; }
   .warn { color: #ffcc00; }
-  #progress, #count { margin-top: 10px; font-weight: bold; }
+  #progress, #count, #found { margin-top: 10px; font-weight: bold; }
 </style>
 </head>
 <body>
 <h1>Binance Futures EMA14 > EMA70 > EMA200 Detector</h1>
-<p>Timeframe: 15m | Safe rate: 1 request/sec | Candles: 200</p>
+<p>Timeframe: 15m | Safe rate: 1 req/sec | Candles: 200 | Max age: 25 candles</p>
 <button id="startBtn">Start Scan</button>
 <div id="progress"></div>
 <div id="count"></div>
+<div id="found"></div>
 
 <table>
   <thead>
@@ -42,6 +43,7 @@ const apiBase = "https://fapi.binance.com";
 const tf = "15m";
 const candlesLimit = 200;
 const delayMs = 1000; // safe rate
+const recentCandleLimit = 25; // ✅ crossing must be within 25 candles
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -81,23 +83,37 @@ async function getGreenSymbols() {
     }));
 }
 
+// ✅ Detect where EMA14 > EMA70 > EMA200 started
+function findRecentCrossIndex(ema14, ema70, ema200) {
+  for (let i = ema14.length - 1; i >= 1; i--) {
+    const isBull = ema14[i] > ema70[i] && ema70[i] > ema200[i];
+    const wasBull = ema14[i - 1] > ema70[i - 1] && ema70[i - 1] > ema200[i - 1];
+    if (isBull && !wasBull) {
+      return i; // index of cross
+    }
+  }
+  return -1;
+}
+
 async function startScan() {
-  document.getElementById("results").innerHTML = "";
+  const results = document.getElementById("results");
+  results.innerHTML = "";
   const progress = document.getElementById("progress");
   const count = document.getElementById("count");
+  const foundText = document.getElementById("found");
 
   progress.innerText = "Fetching 24h green pairs...";
   const allSymbols = await getAllSymbols();
   const greenList = await getGreenSymbols();
   const greenSymbols = greenList.filter(g => allSymbols.includes(g.symbol));
 
-  count.innerHTML = `🟢 Found <span class="ok">${greenSymbols.length}</span> green USDT perpetual pairs`;
-  progress.innerHTML = `<span class="warn">Starting EMA scan only for green pairs...</span>`;
+  count.innerHTML = `🟢 Found <span class="ok">${greenSymbols.length}</span> green USDT perpetual pairs.`;
+  progress.innerHTML = `<span class="warn">Scanning for recent EMA crosses (≤${recentCandleLimit} candles)...</span>`;
 
   let found = 0;
   for (let i = 0; i < greenSymbols.length; i++) {
     const { symbol, change } = greenSymbols[i];
-    progress.innerText = `Scanning ${i + 1}/${greenSymbols.length} - ${symbol}`;
+    progress.innerText = `Scanning ${i + 1}/${greenSymbols.length} — ${symbol}`;
 
     try {
       const closes = await fetchCandles(symbol);
@@ -105,31 +121,35 @@ async function startScan() {
       const ema70 = ema(closes, 70);
       const ema200 = ema(closes, 200);
 
-      const e14 = ema14.at(-1);
-      const e70 = ema70.at(-1);
-      const e200 = ema200.at(-1);
+      const crossIndex = findRecentCrossIndex(ema14, ema70, ema200);
+      const candlesAgo = ema14.length - crossIndex;
 
-      if (e14 > e70 && e70 > e200) {
+      if (crossIndex !== -1 && candlesAgo <= recentCandleLimit) {
         found++;
+        const e14 = ema14.at(-1);
+        const e70 = ema70.at(-1);
+        const e200 = ema200.at(-1);
         const row = `<tr>
           <td>${symbol}</td>
           <td style="color:#00ff88;">${change.toFixed(2)}%</td>
           <td>${e14.toFixed(2)}</td>
           <td>${e70.toFixed(2)}</td>
           <td>${e200.toFixed(2)}</td>
-          <td class="ok">✅ EMA14 > EMA70 > EMA200</td>
+          <td class="ok">✅ Bullish Cross ${candlesAgo} candles ago</td>
         </tr>`;
-        document.getElementById("results").insertAdjacentHTML("beforeend", row);
+        results.insertAdjacentHTML("beforeend", row);
+        foundText.innerHTML = `✅ Found so far: <span class="ok">${found}</span>`;
       }
-    } catch (e) {
-      console.warn("Error on", symbol, e.message);
+    } catch (err) {
+      console.warn("Error on", symbol, err.message);
     }
 
     await sleep(delayMs);
   }
 
-  progress.innerHTML = `<span class="ok">✅ Scan complete. Found ${found} pairs matching EMA14>EMA70>EMA200.</span>`;
+  progress.innerHTML = `<span class="ok">✅ Scan complete — ${found} pairs with recent EMA cross (≤${recentCandleLimit}).</span>`;
 }
+
 document.getElementById("startBtn").addEventListener("click", startScan);
 </script>
 </body>
