@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Fast Binance Futures EMA Cross Detector</title>
+<title>Binance Futures — Green 24h + EMA70/200 Bullish Cross Detector</title>
 <style>
   body { font-family: Arial, sans-serif; background: #0d1117; color: #eee; text-align: center; }
   h1 { color: #f1c40f; }
@@ -17,8 +17,9 @@
 </style>
 </head>
 <body>
-<h1>Binance Futures EMA Detector — Green 24h + Bullish EMA70/200 Cross</h1>
-<p>Timeframe: 15m | Candles: 200 | Concurrency: 5</p>
+<h1>Binance Futures EMA70/200 Bullish Cross Detector</h1>
+<p>Stage 1: Show all <span class="ok">green 24h change</span> pairs<br>
+Stage 2: Check only those for <span class="warn">EMA70/200 bullish cross (15m)</span></p>
 <button id="startBtn">Start Scan</button>
 <div id="progress"></div>
 <table>
@@ -79,31 +80,46 @@ async function getGreenSymbols() {
   const data = await res.json();
   return data
     .filter(t => t.symbol.endsWith("USDT") && parseFloat(t.priceChangePercent) > 0)
+    .sort((a, b) => parseFloat(b.priceChangePercent) - parseFloat(a.priceChangePercent))
     .map(t => ({
       symbol: t.symbol,
       change: parseFloat(t.priceChangePercent)
     }));
 }
 
+async function displayGreenList(greenList) {
+  const tbody = document.getElementById("results");
+  tbody.innerHTML = "";
+  for (const g of greenList) {
+    const row = `<tr id="${g.symbol}">
+      <td>${g.symbol}</td>
+      <td style="color:#00ff88;">${g.change.toFixed(2)}%</td>
+      <td>-</td><td>-</td>
+      <td class="warn">Waiting for EMA check...</td>
+    </tr>`;
+    tbody.insertAdjacentHTML("beforeend", row);
+  }
+}
+
 async function processSymbol(symObj) {
-  const { symbol, change } = symObj;
+  const { symbol } = symObj;
   try {
     const closes = await fetchCandles(symbol);
     const ema70 = ema(closes, 70);
     const ema200 = ema(closes, 200);
     const e70 = ema70.at(-1);
     const e200 = ema200.at(-1);
-
     const recentCross = checkRecentBullishCross(ema70, ema200);
+    const row = document.getElementById(symbol);
+
     if (recentCross && e70 > e200) {
-      const row = `<tr>
-        <td>${symbol}</td>
-        <td style="color:#00ff88;">${change.toFixed(2)}%</td>
-        <td>${e70.toFixed(2)}</td>
-        <td>${e200.toFixed(2)}</td>
-        <td class="ok">✅ Recent Bullish Cross</td>
-      </tr>`;
-      document.getElementById("results").insertAdjacentHTML("beforeend", row);
+      row.children[2].innerText = e70.toFixed(2);
+      row.children[3].innerText = e200.toFixed(2);
+      row.children[4].innerHTML = `<span class="ok">✅ Bullish Cross</span>`;
+    } else {
+      row.children[2].innerText = e70.toFixed(2);
+      row.children[3].innerText = e200.toFixed(2);
+      row.children[4].innerText = "—";
     }
   } catch (err) {
     console.warn("Error on", symbol, err.message);
@@ -113,15 +129,18 @@ async function processSymbol(symObj) {
 async function startScan() {
   document.getElementById("results").innerHTML = "";
   const progress = document.getElementById("progress");
-
-  progress.innerText = "Fetching 24h ticker data...";
+  progress.innerText = "Fetching 24h green pairs...";
+  
   const allSymbols = await getAllSymbols();
   const greenList = await getGreenSymbols();
-
   const greenSymbols = greenList.filter(g => allSymbols.includes(g.symbol));
-  progress.innerHTML = `<span class="warn">Found ${greenSymbols.length} green USDT perpetual pairs. Starting EMA scan...</span>`;
 
-  // --- Concurrent scanning (5 at a time) ---
+  progress.innerHTML = `<span class="warn">Found ${greenSymbols.length} green perpetual pairs.</span>`;
+  await displayGreenList(greenSymbols);
+
+  progress.innerHTML += `<br>Starting EMA70/200 bullish cross detection...`;
+
+  // --- Concurrent scanning (safe rate-limit) ---
   let index = 0;
   const batch = async () => {
     const tasks = [];
@@ -131,8 +150,8 @@ async function startScan() {
     await Promise.all(tasks);
     if (index < greenSymbols.length) await batch();
   };
-
   await batch();
+
   progress.innerHTML += `<br><span class="ok">✅ Scan complete.</span>`;
 }
 
