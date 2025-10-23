@@ -173,8 +173,8 @@
       <th>EMA14</th>
       <th>EMA70</th>
       <th>EMA200</th>
-      <th>Vol Now</th>
-      <th>Avg Vol</th>
+      <th>RSI A</th>
+<th>RSI Now</th>
       <th>Status</th>
     </tr>
   </thead>
@@ -247,51 +247,83 @@ async function preloadCounts(){
   document.getElementById("redCount").textContent = reds;
 }
 
-async function processSymbol({symbol, change}, mode){
-  try{
-    const candles = await fetchCandles(symbol);
-    const closes = candles.map(c=>c.close);
-    const volumes = candles.map(c=>c.volume);
+    function calcRSI(closes, period = 14) {
+  let gains = 0, losses = 0;
+  for (let i = 1; i <= period; i++) {
+    const diff = closes[i] - closes[i - 1];
+    if (diff >= 0) gains += diff;
+    else losses -= diff;
+  }
+  let avgGain = gains / period;
+  let avgLoss = losses / period;
+  const rsi = [100 - 100 / (1 + avgGain / avgLoss)];
 
-    const ema14 = ema(closes,14);
-    const ema70 = ema(closes,70);
-    const ema200 = ema(closes,200);
+  for (let i = period + 1; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    const gain = Math.max(0, diff);
+    const loss = Math.max(0, -diff);
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+    const rs = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+    rsi.push(rs);
+  }
+  // pad start for same length as closes
+  while (rsi.length < closes.length) rsi.unshift(rsi[0]);
+  return rsi;
+    }
+
+async function processSymbol({symbol, change}, mode){
+  try {
+    const candles = await fetchCandles(symbol);
+    const closes = candles.map(c => c.close);
+
+    const ema14 = ema(closes, 14);
+    const ema70 = ema(closes, 70);
+    const ema200 = ema(closes, 200);
     const last = ema14.length - 1;
+
+    // --- RSI calculation ---
+    const rsi = calcRSI(closes, 14);
 
     const isBullish = mode.includes("bullish");
     const crossIdx = isBullish
       ? findBullishCross(ema70, ema200)
       : findBearishCross(ema70, ema200);
 
-    // ❌ Ignore if no actual EMA70–EMA200 cross
     if (crossIdx === -1) return null;
 
     const barsAgo = ema70.length - 1 - crossIdx;
     if (barsAgo > recentLimit) return null;
 
-    // ✅ Trend alignment
     const aligned = isBullish
       ? (ema14[last] > ema70[last] && ema70[last] > ema200[last])
       : (ema14[last] < ema70[last] && ema70[last] < ema200[last]);
     if (!aligned) return null;
 
-    // 📊 Volume breakout detection
+    // --- RSI divergence detection ---
+    const rsiBefore = rsi.slice(0, crossIdx); // RSI history before cross
+    if (rsiBefore.length < 5) return null;
+
+    const rsiA = isBullish
+      ? Math.max(...rsiBefore) // highest RSI before cross
+      : Math.min(...rsiBefore); // lowest RSI before cross
+
+    const rsiNow = rsi[last];
+
+    const divergent = isBullish
+      ? rsiNow < rsiA // RSI still below previous high
+      : rsiNow > rsiA; // RSI still above previous low
+
+    if (!divergent) return null;
+
+    // --- Price breakout confirmation (optional but realistic) ---
     const lookback = 30;
-    const recentVols = volumes.slice(-lookback);
-    const avgVol = recentVols.reduce((a,b)=>a+b,0)/lookback;
-    const volNow = volumes[last];
-    const volBreakout = volNow > avgVol * 1.5;
-
-    // 💥 Price breakout detection
-    const recentPrices = closes.slice(-lookback);
-    const highRecent = Math.max(...recentPrices);
-    const lowRecent = Math.min(...recentPrices);
+    const highs = closes.slice(-lookback);
+    const highRecent = Math.max(...highs);
+    const lowRecent = Math.min(...highs);
     const priceNow = closes[last];
-    const priceBreakout = isBullish ? priceNow > highRecent : priceNow < lowRecent;
-
-    // ✅ Confirm both conditions
-    const breakoutConfirmed = volBreakout && priceBreakout;
-    if (!breakoutConfirmed) return null;
+    const breakout = isBullish ? priceNow > highRecent : priceNow < lowRecent;
+    if (!breakout) return null;
 
     return {
       symbol,
@@ -299,15 +331,15 @@ async function processSymbol({symbol, change}, mode){
       e14: ema14[last].toFixed(2),
       e70: ema70[last].toFixed(2),
       e200: ema200[last].toFixed(2),
-      volNow: volNow.toFixed(0),
-      avgVol: avgVol.toFixed(0),
+      rsiNow: rsiNow.toFixed(1),
+      rsiA: rsiA.toFixed(1),
       barsAgo,
       mode
     };
   } catch {
     return null;
   }
-}
+    }
 
 function disableButtons(state){
   document.querySelectorAll("button").forEach(btn=>btn.disabled=state);
@@ -369,7 +401,8 @@ async function startScan(mode, auto=false){
         <td>${r.symbol}</td>
         <td style="color:${r.change>0?"#00ff88":"#ff5555"}">${r.change.toFixed(2)}%</td>
         <td>${r.e14}</td><td>${r.e70}</td><td>${r.e200}</td>
-        <td>${r.volNow}</td><td>${r.avgVol}</td>
+        <td>${r.rsiA}</td>
+<td>${r.rsiNow}</td>
         <td class="${r.mode.includes("bullish")?'ok':'bear'}">
           ${r.mode.includes("bullish")?'✅ Bullish Breakout':'⚠️ Bearish Breakout'}
           (${r.barsAgo} candles ago)
