@@ -274,104 +274,69 @@ async function preloadCounts(){
 
 async function processSymbol({ symbol, change }, mode) {
   try {
+    // === Quick 24h color filter to speed up scanning ===
+    if (mode.includes("bullish") && change < 0) return null; // skip red coins
+    if (mode.includes("bearish") && change > 0) return null; // skip green coins
+
+    // === Fetch candle data ===
     const candles = await fetchCandles(symbol);
     const closes = candles.map(c => c.close);
+
+    // === Compute EMAs ===
     const ema14 = ema(closes, 14);
     const ema70 = ema(closes, 70);
     const ema200 = ema(closes, 200);
     const last = ema14.length - 1;
 
-    // === RSI Calculation ===
-    function calcRSI(values, period = 14) {
-      let gains = 0, losses = 0;
-      for (let i = 1; i <= period; i++) {
-        const diff = values[i] - values[i - 1];
-        if (diff >= 0) gains += diff;
-        else losses -= diff;
+    // === Detect EMA70–EMA200 Cross ===
+    const isBullish = mode.includes("bullish");
+    let crossIdx = -1;
+
+    for (let i = ema70.length - 2; i >= 0; i--) {
+      const prevCross = ema70[i] - ema200[i];
+      const currCross = ema70[i + 1] - ema200[i + 1];
+
+      if (isBullish && prevCross <= 0 && currCross > 0) {
+        crossIdx = i + 1; // bullish cross detected
+        break;
+      } else if (!isBullish && prevCross >= 0 && currCross < 0) {
+        crossIdx = i + 1; // bearish cross detected
+        break;
       }
-      let avgGain = gains / period;
-      let avgLoss = losses / period;
-      const rsiArr = [50];
-      for (let i = period; i < values.length; i++) {
-        const diff = values[i] - values[i - 1];
-        const gain = Math.max(0, diff);
-        const loss = Math.max(0, -diff);
-        avgGain = (avgGain * (period - 1) + gain) / period;
-        avgLoss = (avgLoss * (period - 1) + loss) / period;
-        const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-        rsiArr.push(100 - 100 / (1 + rs));
-      }
-      while (rsiArr.length < values.length) rsiArr.unshift(50);
-      return rsiArr;
     }
 
-    const rsi = calcRSI(closes, 14);
+    if (crossIdx === -1) return null; // no cross found
 
-    // === EMA Cross Detection ===
-    const isBullish = mode.includes("bullish");
-    const crossIdx = isBullish
-      ? findBullishCross(ema70, ema200)
-      : findBearishCross(ema70, ema200);
-
-    if (crossIdx === -1) return null;
+    // === Validate how recent the cross is ===
     const barsAgo = ema70.length - 1 - crossIdx;
-    if (barsAgo > recentLimit) return null;
+    if (barsAgo > 50) return null; // ignore if too old (25 before + 25 after)
 
-    // === EMA Alignment ===
-    const aligned = isBullish
-      ? ema14[last] > ema70[last] && ema70[last] > ema200[last]
-      : ema14[last] < ema70[last] && ema70[last] < ema200[last];
-    if (!aligned) return null;
-
-    // === RSI Divergence Detection ===
+    // === Define window range for RSI/divergence or analysis ===
     const beforeStart = Math.max(0, crossIdx - 25);
-    const afterEnd = Math.min(rsi.length - 1, crossIdx + 25);
+    const afterEnd = Math.min(ema70.length - 1, crossIdx + 25);
+    const priceWindow = closes.slice(beforeStart, afterEnd);
 
-    const rsiBefore = rsi.slice(beforeStart, crossIdx);
-    const rsiAfter = rsi.slice(crossIdx, afterEnd);
-
-    if (rsiBefore.length < 5 || rsiAfter.length < 1) return null;
-
-    const rsiA = isBullish
-      ? Math.max(...rsiBefore) // Highest RSI before cross
-      : Math.min(...rsiBefore); // Lowest RSI before cross
-
-    const rsiB = isBullish
-      ? Math.max(...rsiAfter) // Highest RSI after cross
-      : Math.min(...rsiAfter); // Lowest RSI after cross
-
-    // Divergence condition (RSI B must not exceed RSI A)
-    const divergent = isBullish
-      ? rsiB < rsiA
-      : rsiB > rsiA;
-
-    if (!divergent) return null;
-
-    // === Price breakout confirmation (optional) ===
-    const lookback = 30;
-    const recentPrices = closes.slice(-lookback);
-    const highRecent = Math.max(...recentPrices);
-    const lowRecent = Math.min(...recentPrices);
-    const priceNow = closes[last];
-    const breakout = isBullish ? priceNow > highRecent : priceNow < lowRecent;
-    if (!breakout) return null;
-
-    // === Return signal result ===
+    // === Return useful debugging / analysis data ===
     return {
       symbol,
       change,
-      e14: ema14[last].toFixed(2),
-      e70: ema70[last].toFixed(2),
-      e200: ema200[last].toFixed(2),
-      rsiA: rsiA.toFixed(1),
-      rsiB: rsiB.toFixed(1),
+      mode,
+      crossIdx,
       barsAgo,
-      mode
+      beforeStart,
+      afterEnd,
+      windowCandles: priceWindow.length,
+      ema14_last: ema14[last].toFixed(2),
+      ema70_last: ema70[last].toFixed(2),
+      ema200_last: ema200[last].toFixed(2),
+      crossType: isBullish ? "🟩 Bullish Cross" : "🟥 Bearish Cross"
     };
-  } catch {
+
+  } catch (err) {
+    console.error(`Error processing ${symbol}:`, err.message);
     return null;
   }
-  }
+}
 
 function disableButtons(state){
   document.querySelectorAll("button").forEach(btn=>btn.disabled=state);
