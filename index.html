@@ -248,26 +248,38 @@ async function processSymbol({symbol, change}, mode){
     const ema70 = ema(closes,70);
     const ema200 = ema(closes,200);
     const last = ema14.length - 1;
-    const crossFn = mode.includes("bullish") ? findBullishCross : findBearishCross;
-    const crossIdx = crossFn(ema70, ema200);
-    if(crossIdx===-1) return null;
-    const barsAgo = ema70.length-1-crossIdx;
-    if(barsAgo>recentLimit) return null;
 
     const isBullish = mode.includes("bullish");
+    const crossIdx = isBullish 
+      ? findBullishCross(ema70, ema200)
+      : findBearishCross(ema70, ema200);
+
+    // ❌ Ignore if no actual EMA70–EMA200 cross detected
+    if (crossIdx === -1) return null;
+
+    const barsAgo = ema70.length - 1 - crossIdx;
+    // ❌ Ignore if cross is too old
+    if (barsAgo > recentLimit) return null;
+
+    // ✅ Keep only if EMA70 actually crossed EMA200 and the structure remains aligned
     const valid = isBullish
-      ? (ema14[last]>ema70[last] && ema70[last]>ema200[last])
-      : (ema14[last]<ema70[last] && ema70[last]<ema200[last]);
-    if(!valid) return null;
+      ? (ema70[last] > ema200[last] && ema14[last] > ema70[last])
+      : (ema70[last] < ema200[last] && ema14[last] < ema70[last]);
+
+    if (!valid) return null;
 
     return {
-      symbol, change,
+      symbol,
+      change,
       e14: ema14[last].toFixed(2),
       e70: ema70[last].toFixed(2),
       e200: ema200[last].toFixed(2),
-      barsAgo, mode
+      barsAgo,
+      mode
     };
-  }catch{return null;}
+  } catch {
+    return null;
+  }
 }
 
 function disableButtons(state){
