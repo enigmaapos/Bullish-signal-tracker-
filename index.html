@@ -294,43 +294,32 @@ async function fetchFundingRate(symbol) {
   }
 }
 
-async function processSymbol({ symbol, change }, mode){
+async function processSymbol({ symbol, change }, mode) {
   try {
     // === Basic Filters ===
     if (mode.includes("bullish") && change < 0) return null;
     if (mode.includes("bearish") && change > 0) return null;
 
-    // 🟢 Skip pairs with negative or zero funding
     const funding = await fetchFundingRate(symbol);
     if (funding <= 0) return null;
 
-    // ⚡ Skip if 24h price change is less than ±10%
     if (Math.abs(change) < 10) return null;
 
     // === Load Candles ===
     const candles = await fetchCandles(symbol);
-    if (!candles || candles.length < 300) return null;
+    if (!candles || candles.length < 100) return null; // we need at least 100 candles
 
-    // === Restrict to daily window (previous → current day) ===
-    const now = new Date();
-    const utcDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-    const prevDayStart = utcDay - 24 * 60 * 60 * 1000;
-    const currDayEnd = utcDay + 24 * 60 * 60 * 1000;
+    // Use only the last 100 candles (most recent)
+    const recentCandles = candles.slice(-100);
 
-    const dailyWindow = candles.filter(c => {
-      const t = new Date(c.time).getTime();
-      return t >= prevDayStart && t <= currDayEnd;
-    });
-    if (dailyWindow.length < 96) return null;
-
-    const closes = dailyWindow.map(c => c.close);
+    const closes = recentCandles.map(c => c.close);
     const ema70 = ema(closes, 70);
     const ema200 = ema(closes, 200);
     const last = ema70.length - 1;
     const isBullish = mode.includes("bullish");
 
     // 🔍 Require at least one candle close inside EMA70–EMA200 range
-    const hasCandleInside = dailyWindow.some((c, idx) => {
+    const hasCandleInside = recentCandles.some((c, idx) => {
       if (idx >= ema70.length) return false;
       const close = c.close;
       return (
@@ -352,23 +341,16 @@ async function processSymbol({ symbol, change }, mode){
     }
     if (crossIdx === -1) return null;
 
-    // === RSI and Timing ===
+    // 🧩 Make sure cross is within last 100 candles
+    const barsAgo = ema70.length - 1 - crossIdx;
+    if (barsAgo > 99) return null; // skip crosses outside the 100-candle window
+
     const rsi = calcRSI(closes, 14);
     const rsiNow = rsi[rsi.length - 1].toFixed(1);
-    const barsAgo = ema70.length - 1 - crossIdx;
-    const crossTime = new Date(dailyWindow[crossIdx].time)
+    const crossTime = new Date(recentCandles[crossIdx].time)
       .toLocaleTimeString("en-US", { hour12: false });
 
-    // 🧩 Filter 1: Skip if cross is too old
-    if (barsAgo > 12) return null;  // older than ~3 hours (15m * 12)
-
-    // 🧩 Filter 2: Skip if current price is too far from cross zone
-    const lastClose = closes[closes.length - 1];
-    const crossZone = (ema70[crossIdx] + ema200[crossIdx]) / 2;
-    const distance = Math.abs(lastClose - crossZone) / crossZone * 100;
-    if (distance > 2.5) return null; // farther than 2.5% from EMA cross zone
-
-    // ✅ Passed all checks — valid signal
+    // === Return only if cross is inside last 100 candles ===
     return {
       symbol,
       change,
