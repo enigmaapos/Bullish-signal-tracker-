@@ -262,16 +262,15 @@ async function processSymbol({ symbol, change }, mode){
     const candles = await fetchCandles(symbol);
     if(!candles || candles.length < 300) return null;
 
-    // === Restrict to daily window (previous → current day) ===
-    const now = new Date();
-    const utcDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-    const prevDayStart = utcDay - 24*60*60*1000;
-    const currDayEnd = utcDay + 24*60*60*1000;
+    // === Restrict strictly to today (current UTC day) ===
+const now = new Date();
+const utcDayStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+const utcDayEnd = utcDayStart + 24 * 60 * 60 * 1000;
 
-    const dailyWindow = candles.filter(c=>{
-      const t = new Date(c.time).getTime();
-      return t >= prevDayStart && t <= currDayEnd;
-    });
+const dailyWindow = candles.filter(c => {
+  const t = new Date(c.time).getTime();
+  return t >= utcDayStart && t < utcDayEnd;
+});
 
     if(dailyWindow.length < 96) return null;
 
