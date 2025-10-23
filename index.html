@@ -296,34 +296,40 @@ async function fetchFundingRate(symbol) {
 
 async function processSymbol({ symbol, change }, mode){
   try {
+    // === Basic Filters ===
     if (mode.includes("bullish") && change < 0) return null;
     if (mode.includes("bearish") && change > 0) return null;
 
+    // 🟢 Skip pairs with negative or zero funding
     const funding = await fetchFundingRate(symbol);
     if (funding <= 0) return null;
 
+    // ⚡ Skip if 24h price change is less than ±10%
     if (Math.abs(change) < 10) return null;
 
+    // === Load Candles ===
     const candles = await fetchCandles(symbol);
-    if(!candles || candles.length < 300) return null;
+    if (!candles || candles.length < 300) return null;
 
+    // === Restrict to daily window (previous → current day) ===
     const now = new Date();
     const utcDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-    const prevDayStart = utcDay - 24*60*60*1000;
-    const currDayEnd = utcDay + 24*60*60*1000;
+    const prevDayStart = utcDay - 24 * 60 * 60 * 1000;
+    const currDayEnd = utcDay + 24 * 60 * 60 * 1000;
 
-    const dailyWindow = candles.filter(c=>{
+    const dailyWindow = candles.filter(c => {
       const t = new Date(c.time).getTime();
       return t >= prevDayStart && t <= currDayEnd;
     });
-    if(dailyWindow.length < 96) return null;
+    if (dailyWindow.length < 96) return null;
 
-    const closes = dailyWindow.map(c=>c.close);
+    const closes = dailyWindow.map(c => c.close);
     const ema70 = ema(closes, 70);
     const ema200 = ema(closes, 200);
     const last = ema70.length - 1;
     const isBullish = mode.includes("bullish");
 
+    // 🔍 Require at least one candle close inside EMA70–EMA200 range
     const hasCandleInside = dailyWindow.some((c, idx) => {
       if (idx >= ema70.length) return false;
       const close = c.close;
@@ -334,23 +340,35 @@ async function processSymbol({ symbol, change }, mode){
     });
     if (!hasCandleInside) return null;
 
+    // === Real cross detection ===
     let crossIdx = -1;
-    for(let i=ema70.length-2;i>=0;i--){
-      const prev70=ema70[i], curr70=ema70[i+1];
-      const prev200=ema200[i], curr200=ema200[i+1];
-      const crossedUp = prev70<prev200 && curr70>curr200;
-      const crossedDown = prev70>prev200 && curr70<curr200;
-      if(isBullish && crossedUp){ crossIdx=i+1; break; }
-      else if(!isBullish && crossedDown){ crossIdx=i+1; break; }
+    for (let i = ema70.length - 2; i >= 0; i--) {
+      const prev70 = ema70[i], curr70 = ema70[i + 1];
+      const prev200 = ema200[i], curr200 = ema200[i + 1];
+      const crossedUp = prev70 < prev200 && curr70 > curr200;
+      const crossedDown = prev70 > prev200 && curr70 < curr200;
+      if (isBullish && crossedUp) { crossIdx = i + 1; break; }
+      else if (!isBullish && crossedDown) { crossIdx = i + 1; break; }
     }
-    if(crossIdx===-1) return null;
+    if (crossIdx === -1) return null;
 
-    const rsi = calcRSI(closes,14);
-    const rsiNow = rsi[rsi.length-1].toFixed(1);
+    // === RSI and Timing ===
+    const rsi = calcRSI(closes, 14);
+    const rsiNow = rsi[rsi.length - 1].toFixed(1);
     const barsAgo = ema70.length - 1 - crossIdx;
     const crossTime = new Date(dailyWindow[crossIdx].time)
-      .toLocaleTimeString("en-US",{hour12:false});
+      .toLocaleTimeString("en-US", { hour12: false });
 
+    // 🧩 Filter 1: Skip if cross is too old
+    if (barsAgo > 12) return null;  // older than ~3 hours (15m * 12)
+
+    // 🧩 Filter 2: Skip if current price is too far from cross zone
+    const lastClose = closes[closes.length - 1];
+    const crossZone = (ema70[crossIdx] + ema200[crossIdx]) / 2;
+    const distance = Math.abs(lastClose - crossZone) / crossZone * 100;
+    if (distance > 2.5) return null; // farther than 2.5% from EMA cross zone
+
+    // ✅ Passed all checks — valid signal
     return {
       symbol,
       change,
@@ -363,7 +381,7 @@ async function processSymbol({ symbol, change }, mode){
       crossType: isBullish ? "🟩 EMA70→200 Cross" : "🟥 EMA200→70 Cross"
     };
 
-  } catch (err){
+  } catch (err) {
     console.error(`Error processing ${symbol}:`, err.message);
     return null;
   }
