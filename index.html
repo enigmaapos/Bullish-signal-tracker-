@@ -267,7 +267,8 @@ async function fetchFundingRate(symbol) {
   }
 }
 
-async function processSymbol({ symbol, change }, mode){
+
+        async function processSymbol({ symbol, change }, mode){
   try {
     if (mode.includes("bullish") && change < 0) return null;
     if (mode.includes("bearish") && change > 0) return null;
@@ -275,6 +276,9 @@ async function processSymbol({ symbol, change }, mode){
     // 🟢 Skip pairs with negative or zero funding
     const funding = await fetchFundingRate(symbol);
     if (funding <= 0) return null;
+
+    // ⚡ Skip if 24h price change is less than ±10%
+    if (Math.abs(change) < 10) return null;
 
     const candles = await fetchCandles(symbol);
     if(!candles || candles.length < 300) return null;
@@ -298,7 +302,7 @@ async function processSymbol({ symbol, change }, mode){
     const last = ema70.length - 1;
     const isBullish = mode.includes("bullish");
 
-    // 🔍 New: check for any candle close inside EMA70–EMA200 range
+    // 🔍 Require at least one candle close inside EMA70–EMA200 range
     const hasCandleInside = dailyWindow.some((c, idx) => {
       if (idx >= ema70.length) return false;
       const close = c.close;
@@ -344,8 +348,9 @@ async function processSymbol({ symbol, change }, mode){
     console.error(`Error processing ${symbol}:`, err.message);
     return null;
   }
-}
-
+        }
+        
+        
 function disableButtons(state){
   document.querySelectorAll("button").forEach(btn=>btn.disabled=state);
 }
