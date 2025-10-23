@@ -174,7 +174,7 @@
       <th>EMA70</th>
       <th>EMA200</th>
       <th>RSI A</th>
-      <th>RSI Now</th>
+<th>RSI Now</th>
       <th>Status</th>
     </tr>
   </thead>
@@ -272,7 +272,7 @@ async function preloadCounts(){
   return rsi;
     }
 
-    async function processSymbol({ symbol, change }, mode) {
+async function processSymbol({ symbol, change }, mode) {
   try {
     // === Quick 24h color filter to speed up scanning ===
     if (mode.includes("bullish") && change < 0) return null; // skip red coins
@@ -376,8 +376,7 @@ async function preloadCounts(){
     console.error(`Error processing ${symbol}:`, err.message);
     return null;
   }
-    }
-    
+      }
 
 function disableButtons(state){
   document.querySelectorAll("button").forEach(btn=>btn.disabled=state);
@@ -428,40 +427,29 @@ async function startScan(mode, auto=false){
   txt.textContent = `Scanning ${filtered.length} pairs...`;
 
   let found = 0;
-
-for (let i = 0; i < filtered.length; i += concurrency) {
-  const batch = filtered.slice(i, i + concurrency);
-  const res = await Promise.all(batch.map(s => processSymbol(s, mode)));
-
-  res.forEach(r => {
-    if (!r) return;
-    found++;
-    document.getElementById("foundCount").textContent = found;
-
-    const row = `
-      <tr>
+  for(let i=0;i<filtered.length;i+=concurrency){
+    const batch = filtered.slice(i,i+concurrency);
+    const res = await Promise.all(batch.map(s=>processSymbol(s,mode)));
+    res.forEach(r=>{
+      if(!r) return;
+      found++;
+      document.getElementById("foundCount").textContent = found;
+      const row = `<tr>
         <td>${r.symbol}</td>
-        <td style="color:${r.change > 0 ? "#00ff88" : "#ff5555"}">
-          ${r.change.toFixed(2)}%
-        </td>
-        <td>${r.e14}</td>
-        <td>${r.e70}</td>
-        <td>${r.e200}</td>
+        <td style="color:${r.change>0?"#00ff88":"#ff5555"}">${r.change.toFixed(2)}%</td>
+        <td>${r.e14}</td><td>${r.e70}</td><td>${r.e200}</td>
         <td>${r.rsiA}</td>
-        <td>${r.rsiNow}</td>
-        <td class="${r.mode.includes("bullish") ? "ok" : "bear"}">
-          ${r.mode.includes("bullish") ? "✅ Bullish Breakout" : "⚠️ Bearish Breakout"}
+<td>${r.rsiNow}</td>
+        <td class="${r.mode.includes("bullish")?'ok':'bear'}">
+          ${r.mode.includes("bullish")?'✅ Bullish Breakout':'⚠️ Bearish Breakout'}
           (${r.barsAgo} candles ago)
         </td>
-      </tr>
-    `;
-
-    resultsEl.insertAdjacentHTML("beforeend", row);
-  });
-
-  updateProgress((i + concurrency) / filtered.length * 100);
-  await sleep(delayMs);
-        }
+      </tr>`;
+      resultsEl.insertAdjacentHTML("beforeend", row);
+    });
+    updateProgress((i+concurrency)/filtered.length*100);
+    await sleep(delayMs);
+  }
 
   txt.textContent = `✅ ${auto ? "Auto-update complete" : "Scan complete"}. Found ${found} breakout crosses.`;
   disableButtons(false);
