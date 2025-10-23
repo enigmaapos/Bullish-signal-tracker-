@@ -170,25 +170,24 @@
     <tr>
       <th>Pair</th>
       <th>24h Change %</th>
-      <th>EMA14</th>
       <th>EMA70</th>
       <th>EMA200</th>
-      <th>RSI A</th>
-<th>RSI Now</th>
-      <th>Status</th>
+      <th>RSI Now</th>
+      <th>Cross Type</th>
+      <th>Cross Time</th>
+      <th>Bars Ago</th>
     </tr>
   </thead>
   <tbody id="results"></tbody>
 </table>
   </div>
 
-  <script>
+            <script>
 const apiBase = "https://fapi.binance.com";
 const tf = "15m";
-const candlesLimit = 200;
+const candlesLimit = 500;
 const concurrency = 10;
 const delayMs = 1000;
-const recentLimit = 25;
 const cooldownMs = 30000;
 const autoRefreshInterval = 5 * 60 * 1000;
 
@@ -200,33 +199,19 @@ async function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
 function ema(values, period){
   const k = 2 / (period + 1);
-  let emaArr = [values[0]];
-  for(let i=1;i<values.length;i++)
+  const emaArr = [values[0]];
+  for(let i=1;i<values.length;i++){
     emaArr.push(values[i]*k + emaArr[i-1]*(1-k));
+  }
   return emaArr;
 }
 
-function findBullishCross(ema70, ema200){
-  for(let i=1;i<ema70.length;i++){
-    if(ema70[i-1]<ema200[i-1] && ema70[i]>=ema200[i]) return i;
-  }
-  return -1;
-}
-
-function findBearishCross(ema70, ema200){
-  for(let i=1;i<ema70.length;i++){
-    if(ema70[i-1]>ema200[i-1] && ema70[i]<=ema200[i]) return i;
-  }
-  return -1;
-}
-
-// ✅ Fetch closes and volumes
 async function fetchCandles(symbol){
   const res = await fetch(`${apiBase}/fapi/v1/klines?symbol=${symbol}&interval=${tf}&limit=${candlesLimit}`);
   const data = await res.json();
   return data.map(c=>({
-    close: parseFloat(c[4]),
-    volume: parseFloat(c[5])
+    time: c[0],
+    close: parseFloat(c[4])
   }));
 }
 
@@ -247,131 +232,90 @@ async function preloadCounts(){
   document.getElementById("redCount").textContent = reds;
 }
 
-    function calcRSI(closes, period = 14) {
+function calcRSI(closes, period = 14){
   let gains = 0, losses = 0;
-  for (let i = 1; i <= period; i++) {
-    const diff = closes[i] - closes[i - 1];
-    if (diff >= 0) gains += diff;
-    else losses -= diff;
+  for(let i=1;i<=period;i++){
+    const diff = closes[i]-closes[i-1];
+    if(diff>=0) gains+=diff; else losses-=diff;
   }
-  let avgGain = gains / period;
-  let avgLoss = losses / period;
-  const rsi = [100 - 100 / (1 + avgGain / avgLoss)];
-
-  for (let i = period + 1; i < closes.length; i++) {
-    const diff = closes[i] - closes[i - 1];
-    const gain = Math.max(0, diff);
-    const loss = Math.max(0, -diff);
-    avgGain = (avgGain * (period - 1) + gain) / period;
-    avgLoss = (avgLoss * (period - 1) + loss) / period;
-    const rs = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
-    rsi.push(rs);
+  let avgGain = gains/period;
+  let avgLoss = losses/period;
+  const rsiArr = [];
+  for(let i=period;i<closes.length;i++){
+    const diff = closes[i]-closes[i-1];
+    const gain = Math.max(0,diff);
+    const loss = Math.max(0,-diff);
+    avgGain = (avgGain*(period-1)+gain)/period;
+    avgLoss = (avgLoss*(period-1)+loss)/period;
+    const rs = avgLoss===0 ? 100 : 100 - 100/(1+avgGain/avgLoss);
+    rsiArr.push(rs);
   }
-  // pad start for same length as closes
-  while (rsi.length < closes.length) rsi.unshift(rsi[0]);
-  return rsi;
-    }
-    
+  while(rsiArr.length < closes.length) rsiArr.unshift(rsiArr[0] || 50);
+  return rsiArr;
+}
 
-async function processSymbol({ symbol, change }, mode) {
+async function processSymbol({ symbol, change }, mode){
   try {
-    // === Filter fast by 24h trend ===
     if (mode.includes("bullish") && change < 0) return null;
     if (mode.includes("bearish") && change > 0) return null;
 
-    // === Fetch 15-minute candle data ===
-    const candles = await fetchCandles(symbol, "15m");
-    if (!candles || candles.length < 300) return null;
+    const candles = await fetchCandles(symbol);
+    if(!candles || candles.length < 300) return null;
 
-    // === Restrict to daily window ===
+    // === Restrict to daily window (previous → current day) ===
     const now = new Date();
     const utcDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-    const prevDayStart = utcDay - 24 * 60 * 60 * 1000; // previous day start
-    const currDayStart = utcDay; // current day start
+    const prevDayStart = utcDay - 24*60*60*1000;
+    const currDayEnd = utcDay + 24*60*60*1000;
 
-    const dailyWindow = candles.filter(c => {
+    const dailyWindow = candles.filter(c=>{
       const t = new Date(c.time).getTime();
-      return t >= prevDayStart && t <= currDayStart + 24 * 60 * 60 * 1000;
+      return t >= prevDayStart && t <= currDayEnd;
     });
 
-    if (dailyWindow.length < 96) return null; // 96 x 15m = 1 day
+    if(dailyWindow.length < 96) return null;
 
-    const closes = dailyWindow.map(c => c.close);
+    const closes = dailyWindow.map(c=>c.close);
 
-    // === Compute EMAs ===
-    const ema70  = ema(closes, 70);
+    const ema70 = ema(closes, 70);
     const ema200 = ema(closes, 200);
-    const last   = ema70.length - 1;
-
+    const last = ema70.length - 1;
     const isBullish = mode.includes("bullish");
+
+    // === Real cross detection ===
     let crossIdx = -1;
-
-    // === Detect Real Cross (exact crossover) ===
-    for (let i = ema70.length - 2; i >= 0; i--) {
-      const prev70 = ema70[i];
-      const prev200 = ema200[i];
-      const curr70 = ema70[i + 1];
-      const curr200 = ema200[i + 1];
-
-      const crossedUp   = prev70 < prev200 && curr70 > curr200;   // ✅ real bullish cross
-      const crossedDown = prev70 > prev200 && curr70 < curr200;   // ✅ real bearish cross
-
-      if (isBullish && crossedUp) {
-        crossIdx = i + 1;
-        break;
-      } else if (!isBullish && crossedDown) {
-        crossIdx = i + 1;
-        break;
-      }
+    for(let i=ema70.length-2;i>=0;i--){
+      const prev70=ema70[i], curr70=ema70[i+1];
+      const prev200=ema200[i], curr200=ema200[i+1];
+      const crossedUp = prev70<prev200 && curr70>curr200;
+      const crossedDown = prev70>prev200 && curr70<curr200;
+      if(isBullish && crossedUp){ crossIdx=i+1; break; }
+      else if(!isBullish && crossedDown){ crossIdx=i+1; break; }
     }
 
-    if (crossIdx === -1) return null;
+    if(crossIdx===-1) return null;
 
-    // === RSI Calculation ===
-    function calcRSI(values, period = 14) {
-      let gains = 0, losses = 0;
-      for (let i = 1; i <= period; i++) {
-        const diff = values[i] - values[i - 1];
-        if (diff >= 0) gains += diff; else losses -= diff;
-      }
-      let avgGain = gains / period, avgLoss = losses / period;
-      const rsiArr = [50];
-      for (let i = period; i < values.length; i++) {
-        const diff  = values[i] - values[i - 1];
-        const gain  = Math.max(0, diff);
-        const loss  = Math.max(0, -diff);
-        avgGain = (avgGain * (period - 1) + gain) / period;
-        avgLoss = (avgLoss * (period - 1) + loss) / period;
-        const rs  = avgLoss === 0 ? 100 : avgGain / avgLoss;
-        rsiArr.push(100 - 100 / (1 + rs));
-      }
-      while (rsiArr.length < values.length) rsiArr.unshift(50);
-      return rsiArr;
-    }
-
-    const rsi = calcRSI(closes, 14);
-    const rsiNow = rsi[rsi.length - 1].toFixed(1);
-
-    // === Return clean data ===
+    const rsi = calcRSI(closes,14);
+    const rsiNow = rsi[rsi.length-1].toFixed(1);
     const barsAgo = ema70.length - 1 - crossIdx;
+    const crossTime = new Date(dailyWindow[crossIdx].time).toLocaleTimeString("en-US",{hour12:false});
+
     return {
       symbol,
       change,
-      rsiNow,
       ema70: ema70[last].toFixed(2),
       ema200: ema200[last].toFixed(2),
+      rsiNow,
+      crossTime,
       barsAgo,
-      crossType: isBullish ? "🟩 EMA70→200 Cross" : "🟥 EMA200→70 Cross",
-      time: new Date(dailyWindow[crossIdx].time).toLocaleTimeString("en-US", { hour12: false }),
-      note: `Real ${isBullish ? "Bullish" : "Bearish"} EMA cross detected on 15m`
+      crossType: isBullish ? "🟩 EMA70→200 Cross" : "🟥 EMA200→70 Cross"
     };
 
-  } catch (err) {
+  } catch (err){
     console.error(`Error processing ${symbol}:`, err.message);
     return null;
   }
 }
-    
 
 function disableButtons(state){
   document.querySelectorAll("button").forEach(btn=>btn.disabled=state);
@@ -432,13 +376,12 @@ async function startScan(mode, auto=false){
       const row = `<tr>
         <td>${r.symbol}</td>
         <td style="color:${r.change>0?"#00ff88":"#ff5555"}">${r.change.toFixed(2)}%</td>
-        <td>${r.e14}</td><td>${r.e70}</td><td>${r.e200}</td>
-        <td>${r.rsiA}</td>
-<td>${r.rsiNow}</td>
-        <td class="${r.mode.includes("bullish")?'ok':'bear'}">
-          ${r.mode.includes("bullish")?'✅ Bullish Breakout':'⚠️ Bearish Breakout'}
-          (${r.barsAgo} candles ago)
-        </td>
+        <td>${r.ema70}</td>
+        <td>${r.ema200}</td>
+        <td>${r.rsiNow}</td>
+        <td>${r.crossType}</td>
+        <td>${r.crossTime}</td>
+        <td>${r.barsAgo}</td>
       </tr>`;
       resultsEl.insertAdjacentHTML("beforeend", row);
     });
@@ -446,7 +389,7 @@ async function startScan(mode, auto=false){
     await sleep(delayMs);
   }
 
-  txt.textContent = `✅ ${auto ? "Auto-update complete" : "Scan complete"}. Found ${found} breakout crosses.`;
+  txt.textContent = `✅ ${auto ? "Auto-update complete" : "Scan complete"}. Found ${found} EMA crosses.`;
   disableButtons(false);
   isScanning = false;
 
@@ -460,6 +403,6 @@ document.getElementById("redBearish").onclick=()=>startScan("red_bearish");
 
 preloadCounts();
 setInterval(preloadCounts, 60000);
-    </script>
+            </script>
 </body>
 </html>
