@@ -305,7 +305,7 @@ async function processSymbol({ symbol, change }, mode){
     if (Math.abs(change) < 10) return null;
 
     const candles = await fetchCandles(symbol);
-    if(!candles || candles.length < 300) return null;
+    if(!candles || candles.length < 100) return null;
 
     const now = new Date();
     const utcDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
