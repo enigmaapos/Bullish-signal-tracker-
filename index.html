@@ -170,6 +170,7 @@
     <tr>
       <th>Pair</th>
       <th>24h Change %</th>
+      <th>Funding</th>
       <th>EMA70</th>
       <th>EMA200</th>
       <th>RSI Now</th>
@@ -254,10 +255,25 @@ function calcRSI(closes, period = 14){
   return rsiArr;
 }
 
+              async function fetchFundingRate(symbol) {
+  try {
+    const res = await fetch(`${apiBase}/fapi/v1/fundingRate?symbol=${symbol}&limit=1`);
+    const data = await res.json();
+    return parseFloat(data?.[0]?.fundingRate ?? 0);
+  } catch (err) {
+    console.warn(`Funding fetch failed for ${symbol}:`, err.message);
+    return 0; // default if API fails
+  }
+              }
+
 async function processSymbol({ symbol, change }, mode){
   try {
     if (mode.includes("bullish") && change < 0) return null;
     if (mode.includes("bearish") && change > 0) return null;
+
+    // 🟢 Skip pairs with negative or zero funding
+    const funding = await fetchFundingRate(symbol);
+    if (funding <= 0) return null;
 
     const candles = await fetchCandles(symbol);
     if(!candles || candles.length < 300) return null;
@@ -390,6 +406,7 @@ async function startScan(mode, auto=false){
       const row = `<tr>
         <td>${r.symbol}</td>
         <td style="color:${r.change>0?"#00ff88":"#ff5555"}">${r.change.toFixed(2)}%</td>
+        <td>${funding.toFixed(4)}%</td>
         <td>${r.ema70}</td>
         <td>${r.ema200}</td>
         <td>${r.rsiNow}</td>
