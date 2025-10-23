@@ -272,6 +272,7 @@ async function preloadCounts(){
   return rsi;
     }
 
+
     async function processSymbol({ symbol, change }, mode) {
   try {
     // === Quick 24h color filter to speed up scanning ===
@@ -333,15 +334,15 @@ async function preloadCounts(){
 
     const rsi = calcRSI(closes, 14);
 
-    // === Define RSI window ===
+    // === Define RSI window around the cross ===
     const beforeStart = Math.max(0, crossIdx - 25);
     const afterEnd = Math.min(rsi.length - 1, crossIdx + 25);
     const rsiBefore = rsi.slice(beforeStart, crossIdx);
-    const rsiAfter  = rsi.slice(crossIdx, afterEnd);
+    const rsiAfter = rsi.slice(crossIdx, afterEnd);
 
     if (rsiBefore.length < 5 || rsiAfter.length < 1) return null;
 
-    // === Point A & B (RSI and Price) ===
+    // === Find RSI and Price Points A & B ===
     const idxA = isBullish
       ? beforeStart + rsiBefore.indexOf(Math.max(...rsiBefore))
       : beforeStart + rsiBefore.indexOf(Math.min(...rsiBefore));
@@ -375,7 +376,7 @@ async function preloadCounts(){
       ema70_last: ema70[last].toFixed(2),
       ema200_last: ema200[last].toFixed(2),
       crossType: isBullish ? "🟩 Bullish Cross" : "🟥 Bearish Cross",
-      note: "RSI–Price divergence confirmed ✅"
+      note: "✅ True RSI–Price divergence confirmed"
     };
 
   } catch (err) {
@@ -383,6 +384,7 @@ async function preloadCounts(){
     return null;
   }
     }
+    
 
 function disableButtons(state){
   document.querySelectorAll("button").forEach(btn=>btn.disabled=state);
