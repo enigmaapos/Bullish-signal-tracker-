@@ -294,90 +294,68 @@ async function fetchFundingRate(symbol) {
   }
 }
 
-async function processSymbol({ symbol, change }, mode){
+async function processSymbol({ symbol, change }, mode) {
   try {
     // === Basic Filters ===
     if (mode.includes("bullish") && change < 0) return null;
     if (mode.includes("bearish") && change > 0) return null;
 
+    // ✅ Must have positive funding
     const funding = await fetchFundingRate(symbol);
     if (funding <= 0) return null;
 
+    // ✅ Must have ≥ 10% 24h price change
     if (Math.abs(change) < 10) return null;
 
     // === Load Candles ===
     const candles = await fetchCandles(symbol);
-    if(!candles || candles.length < 100) return null;
+    if (!candles || candles.length < 100) return null;
 
-    // Use only the last 100 candles (most recent)
+    // Only use last 100 candles
     const recentCandles = candles.slice(-100);
-
     const closes = recentCandles.map(c => c.close);
+
     const ema70 = ema(closes, 70);
     const ema200 = ema(closes, 200);
     const last = ema70.length - 1;
     const isBullish = mode.includes("bullish");
 
-    // 🔍 Require at least one candle close inside EMA70–EMA200 range
-    const hasCandleInside = recentCandles.some((c, idx) => {
-      if (idx >= ema70.length) return false;
-      const close = c.close;
-      return (
-        close >= Math.min(ema70[idx], ema200[idx]) &&
-        close <= Math.max(ema70[idx], ema200[idx])
-      );
-    });
-    if (!hasCandleInside) return null;
-
-    // === Real cross detection ===
+    // === Detect EMA Cross ===
     let crossIdx = -1;
-    for(let i=ema70.length-2;i>=0;i--){
-      const prev70=ema70[i], curr70=ema70[i+1];
-      const prev200=ema200[i], curr200=ema200[i+1];
-      const crossedUp = prev70<prev200 && curr70>curr200;
-      const crossedDown = prev70>prev200 && curr70<curr200;
-      if(isBullish && crossedUp){ crossIdx=i+1; break; }
-      else if(!isBullish && crossedDown){ crossIdx=i+1; break; }
+    for (let i = ema70.length - 2; i >= 0; i--) {
+      const prev70 = ema70[i], curr70 = ema70[i + 1];
+      const prev200 = ema200[i], curr200 = ema200[i + 1];
+      const crossedUp = prev70 < prev200 && curr70 > curr200;
+      const crossedDown = prev70 > prev200 && curr70 < curr200;
+      if (isBullish && crossedUp) { crossIdx = i + 1; break; }
+      else if (!isBullish && crossedDown) { crossIdx = i + 1; break; }
     }
-    if(crossIdx===-1) return null;
+    if (crossIdx === -1) return null;
 
-    // ✅ Only keep crosses within last 100 candles
+    // ✅ Only keep recent crosses (within last 20 candles)
     const barsAgo = ema70.length - 1 - crossIdx;
-    if (barsAgo > 99) return null;
+    if (barsAgo > 20) return null;
 
-    // ✅ Ensure current price is near EMA zone
-    const currentClose = closes[last];
-    const currentEma70 = ema70[last];
-    const currentEma200 = ema200[last];
-    const emaMid = (currentEma70 + currentEma200) / 2;
-    const emaGap = Math.abs(currentEma70 - currentEma200);
-    const priceDistance = Math.abs(currentClose - emaMid);
-    if (priceDistance > emaGap * 1.5) return null; // too far from crossover zone
-
-    // === RSI + cross info ===
-    const rsi = calcRSI(closes,14);
-    const rsiNow = rsi[rsi.length-1].toFixed(1);
     const crossTime = new Date(recentCandles[crossIdx].time)
-      .toLocaleTimeString("en-US",{hour12:false});
+      .toLocaleTimeString("en-US", { hour12: false });
 
-    // ✅ Return only if cross still near EMA zone
+    // === Return minimal info ===
     return {
       symbol,
       change,
       funding,
       ema70: ema70[last].toFixed(2),
       ema200: ema200[last].toFixed(2),
-      rsiNow,
       crossTime,
       barsAgo,
       crossType: isBullish ? "🟩 EMA70→200 Cross" : "🟥 EMA200→70 Cross"
     };
 
-  } catch (err){
+  } catch (err) {
     console.error(`Error processing ${symbol}:`, err.message);
     return null;
   }
-}
+        }
 
 function disableButtons(state){
   document.querySelectorAll("button").forEach(btn=>btn.disabled=state);
