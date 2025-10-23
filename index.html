@@ -205,18 +205,21 @@
   </div>
   </div>
 
-      <script>
+           <script>
 const apiBase = "https://fapi.binance.com";
 const tf = "15m";
 const candlesLimit = 500;
 const concurrency = 10;
 const delayMs = 1000;
 const cooldownMs = 30000;
-const autoRefreshInterval = 5 * 60 * 1000;
+const batchSize = 20; // refresh batch size
+const batchRefreshDelay = 10000; // 10s between batch refreshes
 
 let isScanning = false;
 let lastScanTime = 0;
 let autoRefreshTimer = null;
+let allSymbols = [];
+let refreshIndex = 0;
 
 async function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
@@ -234,7 +237,9 @@ async function fetchCandles(symbol){
   const data = await res.json();
   return data.map(c=>({
     time: c[0],
-    close: parseFloat(c[4])
+    open: parseFloat(c[1]),
+    close: parseFloat(c[4]),
+    volume: parseFloat(c[5])
   }));
 }
 
@@ -289,23 +294,19 @@ async function fetchFundingRate(symbol) {
   }
 }
 
-
-        async function processSymbol({ symbol, change }, mode){
+async function processSymbol({ symbol, change }, mode){
   try {
     if (mode.includes("bullish") && change < 0) return null;
     if (mode.includes("bearish") && change > 0) return null;
 
-    // 🟢 Skip pairs with negative or zero funding
     const funding = await fetchFundingRate(symbol);
     if (funding <= 0) return null;
 
-    // ⚡ Skip if 24h price change is less than ±10%
     if (Math.abs(change) < 10) return null;
 
     const candles = await fetchCandles(symbol);
     if(!candles || candles.length < 300) return null;
 
-    // === Restrict to daily window (previous → current day) ===
     const now = new Date();
     const utcDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
     const prevDayStart = utcDay - 24*60*60*1000;
@@ -315,7 +316,6 @@ async function fetchFundingRate(symbol) {
       const t = new Date(c.time).getTime();
       return t >= prevDayStart && t <= currDayEnd;
     });
-    
     if(dailyWindow.length < 96) return null;
 
     const closes = dailyWindow.map(c=>c.close);
@@ -324,7 +324,6 @@ async function fetchFundingRate(symbol) {
     const last = ema70.length - 1;
     const isBullish = mode.includes("bullish");
 
-    // 🔍 Require at least one candle close inside EMA70–EMA200 range
     const hasCandleInside = dailyWindow.some((c, idx) => {
       if (idx >= ema70.length) return false;
       const close = c.close;
@@ -335,7 +334,6 @@ async function fetchFundingRate(symbol) {
     });
     if (!hasCandleInside) return null;
 
-    // === Real cross detection ===
     let crossIdx = -1;
     for(let i=ema70.length-2;i>=0;i--){
       const prev70=ema70[i], curr70=ema70[i+1];
@@ -345,7 +343,6 @@ async function fetchFundingRate(symbol) {
       if(isBullish && crossedUp){ crossIdx=i+1; break; }
       else if(!isBullish && crossedDown){ crossIdx=i+1; break; }
     }
-
     if(crossIdx===-1) return null;
 
     const rsi = calcRSI(closes,14);
@@ -370,23 +367,14 @@ async function fetchFundingRate(symbol) {
     console.error(`Error processing ${symbol}:`, err.message);
     return null;
   }
-        }
-        
-        
+}
+
 function disableButtons(state){
   document.querySelectorAll("button").forEach(btn=>btn.disabled=state);
 }
 
 function updateProgress(percent){
   document.getElementById("progress-bar").style.width = `${Math.min(100,percent)}%`;
-}
-
-function startAutoRefresh(mode){
-  if(autoRefreshTimer) clearInterval(autoRefreshTimer);
-  autoRefreshTimer = setInterval(()=>{
-    console.log(`🔁 Auto-refreshing ${mode} scan...`);
-    startScan(mode, true);
-  }, autoRefreshInterval);
 }
 
 function sortTableByChange(ascending = false) {
@@ -399,6 +387,47 @@ function sortTableByChange(ascending = false) {
   });
   tbody.innerHTML = "";
   rows.forEach(r => tbody.appendChild(r));
+}
+
+// 🆕 Incremental batch refresh system
+async function refreshBatch(mode) {
+  if (!allSymbols.length || isScanning) return;
+  isScanning = true;
+
+  const txt = document.getElementById("progressText");
+  txt.textContent = `🔄 Refreshing batch ${Math.floor(refreshIndex / batchSize) + 1}...`;
+
+  const batch = allSymbols.slice(refreshIndex, refreshIndex + batchSize);
+  const res = await Promise.all(batch.map(s => processSymbol(s, mode)));
+
+  res.forEach(r => {
+    if (!r) return;
+    let existingRow = document.querySelector(`tr[data-symbol="${r.symbol}"]`);
+    if (existingRow) {
+      existingRow.innerHTML = `
+        <td>${r.symbol}</td>
+        <td style="color:${r.change>0?"#00ff88":"#ff5555"}">${r.change.toFixed(2)}%</td>
+        <td>${r.funding.toFixed(4)}%</td>
+        <td>${r.ema70}</td>
+        <td>${r.ema200}</td>
+        <td>${r.rsiNow}</td>
+        <td>${r.crossType}</td>
+        <td>${r.crossTime}</td>
+        <td>${r.barsAgo}</td>
+      `;
+    }
+  });
+
+  refreshIndex += batchSize;
+  if (refreshIndex >= allSymbols.length) refreshIndex = 0;
+
+  txt.textContent = `✅ Batch refresh done (${refreshIndex}/${allSymbols.length}).`;
+  isScanning = false;
+}
+
+function startAutoRefresh(mode) {
+  if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+  autoRefreshTimer = setInterval(() => refreshBatch(mode), batchRefreshDelay);
 }
 
 async function startScan(mode, auto=false){
@@ -431,6 +460,9 @@ async function startScan(mode, auto=false){
     return false;
   });
 
+  allSymbols = filtered; // ✅ store for batch refreshes
+  refreshIndex = 0;
+
   txt.textContent = `Scanning ${filtered.length} pairs...`;
 
   let found = 0;
@@ -441,7 +473,9 @@ async function startScan(mode, auto=false){
       if(!r) return;
       found++;
       document.getElementById("foundCount").textContent = found;
-      const row = `<tr>
+      const row = document.createElement("tr");
+      row.setAttribute("data-symbol", r.symbol);
+      row.innerHTML = `
         <td>${r.symbol}</td>
         <td style="color:${r.change>0?"#00ff88":"#ff5555"}">${r.change.toFixed(2)}%</td>
         <td>${r.funding.toFixed(4)}%</td>
@@ -451,18 +485,19 @@ async function startScan(mode, auto=false){
         <td>${r.crossType}</td>
         <td>${r.crossTime}</td>
         <td>${r.barsAgo}</td>
-      </tr>`;
-      resultsEl.insertAdjacentHTML("beforeend", row);
+      `;
+      resultsEl.appendChild(row);
     });
     updateProgress((i+concurrency)/filtered.length*100);
     await sleep(delayMs);
   }
 
-  sortTableByChange(false); // sort descending
-  txt.textContent = `✅ ${auto ? "Auto-update complete" : "Scan complete"}. Found ${found} EMA crosses.`;
+  sortTableByChange(false);
+  txt.textContent = `✅ Scan complete. Found ${found} EMA crosses.`;
   disableButtons(false);
   isScanning = false;
-  if(!auto) startAutoRefresh(mode);
+
+  startAutoRefresh(mode); // start incremental refresh
 }
 
 document.getElementById("greenBullish").onclick=()=>startScan("green_bullish");
@@ -472,6 +507,6 @@ document.getElementById("redBearish").onclick=()=>startScan("red_bearish");
 
 preloadCounts();
 setInterval(preloadCounts, 60000);
-    </script>
+                                                                    </script>
 </body>
 </html>
