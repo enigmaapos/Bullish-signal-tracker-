@@ -298,6 +298,17 @@ async function processSymbol({ symbol, change }, mode){
     const last = ema70.length - 1;
     const isBullish = mode.includes("bullish");
 
+    // 🔍 New: check for any candle close inside EMA70–EMA200 range
+    const hasCandleInside = dailyWindow.some((c, idx) => {
+      if (idx >= ema70.length) return false;
+      const close = c.close;
+      return (
+        close >= Math.min(ema70[idx], ema200[idx]) &&
+        close <= Math.max(ema70[idx], ema200[idx])
+      );
+    });
+    if (!hasCandleInside) return null;
+
     // === Real cross detection ===
     let crossIdx = -1;
     for(let i=ema70.length-2;i>=0;i--){
@@ -320,7 +331,7 @@ async function processSymbol({ symbol, change }, mode){
     return {
       symbol,
       change,
-      funding, // ✅ added
+      funding,
       ema70: ema70[last].toFixed(2),
       ema200: ema200[last].toFixed(2),
       rsiNow,
