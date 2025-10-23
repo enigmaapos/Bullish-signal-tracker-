@@ -352,23 +352,23 @@ async function processSymbol({ symbol, change }, mode){
 
     if(crossIdx===-1) return null;
 
-    // 🧩 Detect high-volume RED candle near cross (ignore green)
+    // 🧩 Detect red high-volume candle near cross (ignore green candles)
 const volValues = dailyWindow.map(c => c.volume);
 const avgVol = volValues.reduce((a, b) => a + b, 0) / volValues.length;
-const volThreshold = avgVol * 2; // 2× average volume = high volume
+const volThreshold = avgVol * 2.5; // 2.5× average = strong flush volume
 
-let hasRedHighVol = false;
+let redHighVolDetected = false;
 for (let i = Math.max(0, crossIdx - 3); i <= Math.min(dailyWindow.length - 1, crossIdx + 3); i++) {
   const c = dailyWindow[i];
   const isRed = c.close < c.open;
   if (isRed && c.volume >= volThreshold) {
-    hasRedHighVol = true;
+    redHighVolDetected = true;
     break;
   }
 }
 
-// ❌ Skip if no red high-volume candle found
-if (!hasRedHighVol) return null;
+// ❌ Skip if no big red high-volume candle detected near cross
+if (!redHighVolDetected) return null;
 
     const rsi = calcRSI(closes,14);
     const rsiNow = rsi[rsi.length-1].toFixed(1);
