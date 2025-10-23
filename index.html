@@ -205,8 +205,7 @@
 </table>
   </div>
 
-
-      <script>
+<script>
 const apiBase = "https://fapi.binance.com";
 const tf = "15m";
 const candlesLimit = 500;
@@ -352,23 +351,23 @@ async function processSymbol({ symbol, change }, mode){
 
     if(crossIdx===-1) return null;
 
-    // 🧩 Detect red high-volume candle near cross (ignore green candles)
-const volValues = dailyWindow.map(c => c.volume);
-const avgVol = volValues.reduce((a, b) => a + b, 0) / volValues.length;
-const volThreshold = avgVol * 2.5; // 2.5× average = strong flush volume
+    // 🧩 Detect ONLY red high-volume candles AFTER the cross
+    const volValues = dailyWindow.map(c => c.volume);
+    const avgVol = volValues.reduce((a, b) => a + b, 0) / volValues.length;
+    const volThreshold = avgVol * 2; // 2× average volume = high volume
 
-let redHighVolDetected = false;
-for (let i = Math.max(0, crossIdx - 3); i <= Math.min(dailyWindow.length - 1, crossIdx + 3); i++) {
-  const c = dailyWindow[i];
-  const isRed = c.close < c.open;
-  if (isRed && c.volume >= volThreshold) {
-    redHighVolDetected = true;
-    break;
-  }
-}
+    let redHighVolDetected = false;
+    for (let i = crossIdx + 1; i <= Math.min(dailyWindow.length - 1, crossIdx + 5); i++) {
+      const c = dailyWindow[i];
+      const isRed = c.close < c.open;
+      if (isRed && c.volume >= volThreshold) {
+        redHighVolDetected = true;
+        break;
+      }
+    }
 
-// ❌ Skip if no big red high-volume candle detected near cross
-if (!redHighVolDetected) return null;
+    // ❌ Skip if no red high-volume candle after cross
+    if (!redHighVolDetected) return null;
 
     const rsi = calcRSI(closes,14);
     const rsiNow = rsi[rsi.length-1].toFixed(1);
@@ -376,9 +375,9 @@ if (!redHighVolDetected) return null;
     const crossTime = new Date(dailyWindow[crossIdx].time)
       .toLocaleTimeString("en-US",{hour12:false});
 
-    let crossType = isBullish ? "🟩 EMA70→200 Cross" : "🟥 EMA200→70 Cross";
-    if (highVolDetected === "red") crossType += " 🔴 High Vol";
-    if (highVolDetected === "green") crossType += " 🟢 High Vol";
+    const crossType = isBullish
+      ? "🟩 EMA70→200 Cross 🔴 Red High Vol"
+      : "🟥 EMA200→70 Cross 🔴 Red High Vol";
 
     return {
       symbol,
@@ -390,7 +389,7 @@ if (!redHighVolDetected) return null;
       crossTime,
       barsAgo,
       crossType,
-      highVolDetected
+      redHighVolDetected
     };
 
   } catch (err){
@@ -468,12 +467,7 @@ async function startScan(mode, auto=false){
       found++;
       document.getElementById("foundCount").textContent = found;
 
-      // 🎨 Highlight row background for high-volume crosses
-      let bgStyle = "";
-      if (r.highVolDetected === "red") bgStyle = "background-color: rgba(255, 0, 0, 0.2);";
-      if (r.highVolDetected === "green") bgStyle = "background-color: rgba(0, 255, 0, 0.2);";
-
-      const row = `<tr style="${bgStyle}">
+      const row = `<tr class="${r.redHighVolDetected ? "highvol-bullish" : ""}">
         <td>${r.symbol}</td>
         <td style="color:${r.change>0?"#00ff88":"#ff5555"}">${r.change.toFixed(2)}%</td>
         <td>${r.funding.toFixed(4)}%</td>
@@ -504,6 +498,6 @@ document.getElementById("redBearish").onclick=()=>startScan("red_bearish");
 
 preloadCounts();
 setInterval(preloadCounts, 60000);
-      </script>
+        </script>
 </body>
 </html>
