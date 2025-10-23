@@ -281,13 +281,13 @@ async function processSymbol({ symbol, change }, mode){
     // === Detect EMA cross ===
     let crossIdx = -1;
     for (let i = ema70.length - 2; i >= 0; i--) {
-      const prev70 = ema70[i], curr70 = ema70[i + 1];
-      const prev200 = ema200[i], curr200 = ema200[i + 1];
-      const crossedUp = prev70 < prev200 && curr70 > curr200;
-      const crossedDown = prev70 > prev200 && curr70 < curr200;
-      if (isBullish && crossedUp) { crossIdx = i + 1; break; }
-      else if (!isBullish && crossedDown) { crossIdx = i + 1; break; }
-    }
+  const prev70 = ema70[i], curr70 = ema70[i + 1];
+  const prev200 = ema200[i], curr200 = ema200[i + 1];
+  const crossedUp = prev70 < prev200 && curr70 > curr200;      // Bullish
+  const crossedDown = prev200 < prev70 && curr200 > curr70;    // Bearish (EMA200 crosses above EMA70)
+  if (isBullish && crossedUp) { crossIdx = i + 1; break; }
+  else if (!isBullish && crossedDown) { crossIdx = i + 1; break; }
+}
     if (crossIdx === -1) return null;
 
     const barsAgo = ema70.length - 1 - crossIdx;
