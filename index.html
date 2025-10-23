@@ -186,34 +186,33 @@
     <div id="progressText" style="text-align:center; margin-bottom:10px;"></div>
 
     <div class="table-container">
-    <table>
-  <thead>
-    <tr>
-      <th>Pair</th>
-      <th>24h Change %</th>
-      <th>Funding</th>
-      <th>EMA70</th>
-      <th>EMA200</th>
-      <th>RSI Now</th>
-      <th>Cross Type</th>
-      <th>Cross Time</th>
-      <th>Bars Ago</th>
-    </tr>
-  </thead>
-  <tbody id="results"></tbody>
-</table>
-  </div>
-  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Pair</th>
+        <th>24h Change %</th>
+        <th>Funding</th>
+        <th>EMA70</th>
+        <th>EMA200</th>
+        <th>RSI Now</th>
+        <th>Cross Type</th>
+        <th>Cross Time</th>
+        <th>Bars Ago</th>
+      </tr>
+    </thead>
+    <tbody id="results"></tbody>
+  </table>
+</div>
 
-           <script>
+<script>
 const apiBase = "https://fapi.binance.com";
 const tf = "15m";
 const candlesLimit = 500;
 const concurrency = 10;
 const delayMs = 1000;
 const cooldownMs = 30000;
-const batchSize = 20; // refresh batch size
-const batchRefreshDelay = 10000; // 10s between batch refreshes
+const batchSize = 20;
+const batchRefreshDelay = 10000;
 
 let isScanning = false;
 let lastScanTime = 0;
@@ -237,9 +236,7 @@ async function fetchCandles(symbol){
   const data = await res.json();
   return data.map(c=>({
     time: c[0],
-    open: parseFloat(c[1]),
-    close: parseFloat(c[4]),
-    volume: parseFloat(c[5])
+    close: parseFloat(c[4])
   }));
 }
 
@@ -260,28 +257,6 @@ async function preloadCounts(){
   document.getElementById("redCount").textContent = reds;
 }
 
-function calcRSI(closes, period = 14){
-  let gains = 0, losses = 0;
-  for(let i=1;i<=period;i++){
-    const diff = closes[i]-closes[i-1];
-    if(diff>=0) gains+=diff; else losses-=diff;
-  }
-  let avgGain = gains/period;
-  let avgLoss = losses/period;
-  const rsiArr = [];
-  for(let i=period;i<closes.length;i++){
-    const diff = closes[i]-closes[i-1];
-    const gain = Math.max(0,diff);
-    const loss = Math.max(0,-diff);
-    avgGain = (avgGain*(period-1)+gain)/period;
-    avgLoss = (avgLoss*(period-1)+loss)/period;
-    const rs = avgLoss===0 ? 100 : 100 - 100/(1+avgGain/avgLoss);
-    rsiArr.push(rs);
-  }
-  while(rsiArr.length < closes.length) rsiArr.unshift(rsiArr[0] || 50);
-  return rsiArr;
-}
-
 // ✅ Fetch recent funding rate (Binance Futures)
 async function fetchFundingRate(symbol) {
   try {
@@ -294,33 +269,25 @@ async function fetchFundingRate(symbol) {
   }
 }
 
+// === Core logic: only EMA cross + filters ===
 async function processSymbol({ symbol, change }, mode) {
   try {
-    // === Basic Filters ===
     if (mode.includes("bullish") && change < 0) return null;
     if (mode.includes("bearish") && change > 0) return null;
 
-    // ✅ Must have positive funding
     const funding = await fetchFundingRate(symbol);
     if (funding <= 0) return null;
-
-    // ✅ Must have ≥ 10% 24h price change
     if (Math.abs(change) < 10) return null;
 
-    // === Load Candles ===
     const candles = await fetchCandles(symbol);
     if (!candles || candles.length < 100) return null;
 
-    // Only use last 100 candles
-    const recentCandles = candles.slice(-100);
-    const closes = recentCandles.map(c => c.close);
-
+    const recent = candles.slice(-100);
+    const closes = recent.map(c => c.close);
     const ema70 = ema(closes, 70);
     const ema200 = ema(closes, 200);
-    const last = ema70.length - 1;
     const isBullish = mode.includes("bullish");
 
-    // === Detect EMA Cross ===
     let crossIdx = -1;
     for (let i = ema70.length - 2; i >= 0; i--) {
       const prev70 = ema70[i], curr70 = ema70[i + 1];
@@ -332,20 +299,20 @@ async function processSymbol({ symbol, change }, mode) {
     }
     if (crossIdx === -1) return null;
 
-    // ✅ Only keep recent crosses (within last 20 candles)
     const barsAgo = ema70.length - 1 - crossIdx;
-    if (barsAgo > 20) return null;
+    if (barsAgo > 20) return null; // only recent crosses
 
-    const crossTime = new Date(recentCandles[crossIdx].time)
+    const last = ema70.length - 1;
+    const crossTime = new Date(recent[crossIdx].time)
       .toLocaleTimeString("en-US", { hour12: false });
 
-    // === Return minimal info ===
     return {
       symbol,
       change,
       funding,
       ema70: ema70[last].toFixed(2),
       ema200: ema200[last].toFixed(2),
+      rsiNow: "-", // no RSI
       crossTime,
       barsAgo,
       crossType: isBullish ? "🟩 EMA70→200 Cross" : "🟥 EMA200→70 Cross"
@@ -355,7 +322,7 @@ async function processSymbol({ symbol, change }, mode) {
     console.error(`Error processing ${symbol}:`, err.message);
     return null;
   }
-        }
+}
 
 function disableButtons(state){
   document.querySelectorAll("button").forEach(btn=>btn.disabled=state);
@@ -365,19 +332,19 @@ function updateProgress(percent){
   document.getElementById("progress-bar").style.width = `${Math.min(100,percent)}%`;
 }
 
-function sortTableByChange(ascending = false) {
+function sortTableByChange(desc = true) {
   const tbody = document.getElementById("results");
   const rows = Array.from(tbody.querySelectorAll("tr"));
   rows.sort((a, b) => {
-    const valA = parseFloat(a.children[1].textContent.replace('%', ''));
-    const valB = parseFloat(b.children[1].textContent.replace('%', ''));
-    return ascending ? valA - valB : valB - valA;
+    const valA = parseFloat(a.children[1].textContent);
+    const valB = parseFloat(b.children[1].textContent);
+    return desc ? valB - valA : valA - valB;
   });
   tbody.innerHTML = "";
   rows.forEach(r => tbody.appendChild(r));
 }
 
-// 🆕 Incremental batch refresh system
+// === Incremental batch refresh ===
 async function refreshBatch(mode) {
   if (!allSymbols.length || isScanning) return;
   isScanning = true;
@@ -390,9 +357,9 @@ async function refreshBatch(mode) {
 
   res.forEach(r => {
     if (!r) return;
-    let existingRow = document.querySelector(`tr[data-symbol="${r.symbol}"]`);
-    if (existingRow) {
-      existingRow.innerHTML = `
+    const row = document.querySelector(`tr[data-symbol="${r.symbol}"]`);
+    if (row) {
+      row.innerHTML = `
         <td>${r.symbol}</td>
         <td style="color:${r.change>0?"#00ff88":"#ff5555"}">${r.change.toFixed(2)}%</td>
         <td>${r.funding.toFixed(4)}%</td>
@@ -401,8 +368,7 @@ async function refreshBatch(mode) {
         <td>${r.rsiNow}</td>
         <td>${r.crossType}</td>
         <td>${r.crossTime}</td>
-        <td>${r.barsAgo}</td>
-      `;
+        <td>${r.barsAgo}</td>`;
     }
   });
 
@@ -418,15 +384,15 @@ function startAutoRefresh(mode) {
   autoRefreshTimer = setInterval(() => refreshBatch(mode), batchRefreshDelay);
 }
 
-async function startScan(mode, auto=false){
-  if(isScanning){
-    if(!auto) alert("⚠️ Scan already running. Wait...");
+async function startScan(mode, auto=false) {
+  if (isScanning) {
+    if (!auto) alert("⚠️ Scan already running. Wait...");
     return;
   }
 
   const now = Date.now();
-  if(!auto && (now - lastScanTime < cooldownMs)){
-    return alert(`⏳ Wait ${(cooldownMs - (now - lastScanTime))/1000|0}s before rescanning.`);
+  if (!auto && (now - lastScanTime < cooldownMs)) {
+    return alert(`⏳ Wait ${(cooldownMs - (now - lastScanTime)) / 1000 | 0}s before rescanning.`);
   }
 
   isScanning = true;
@@ -439,28 +405,23 @@ async function startScan(mode, auto=false){
   resultsEl.innerHTML = "";
   document.getElementById("foundCount").textContent = 0;
 
-  txt.textContent = auto ? "Auto-refreshing..." : "Fetching 24h tickers...";
+  txt.textContent = "Fetching 24h tickers...";
   const tickers = await get24hSymbols();
-  const filtered = tickers.filter(t=>{
-    if(!t.symbol.endsWith("USDT")) return false;
-    if(mode.includes("green")) return t.change>0;
-    if(mode.includes("red")) return t.change<0;
-    return false;
-  });
+  const filtered = tickers.filter(t => t.symbol.endsWith("USDT"));
 
-  allSymbols = filtered; // ✅ store for batch refreshes
+  allSymbols = filtered;
   refreshIndex = 0;
 
   txt.textContent = `Scanning ${filtered.length} pairs...`;
-
   let found = 0;
-  for(let i=0;i<filtered.length;i+=concurrency){
-    const batch = filtered.slice(i,i+concurrency);
-    const res = await Promise.all(batch.map(s=>processSymbol(s,mode)));
-    res.forEach(r=>{
-      if(!r) return;
+
+  for (let i = 0; i < filtered.length; i += concurrency) {
+    const batch = filtered.slice(i, i + concurrency);
+    const res = await Promise.all(batch.map(s => processSymbol(s, mode)));
+
+    res.forEach(r => {
+      if (!r) return;
       found++;
-      document.getElementById("foundCount").textContent = found;
       const row = document.createElement("tr");
       row.setAttribute("data-symbol", r.symbol);
       row.innerHTML = `
@@ -472,29 +433,29 @@ async function startScan(mode, auto=false){
         <td>${r.rsiNow}</td>
         <td>${r.crossType}</td>
         <td>${r.crossTime}</td>
-        <td>${r.barsAgo}</td>
-      `;
+        <td>${r.barsAgo}</td>`;
       resultsEl.appendChild(row);
     });
-    updateProgress((i+concurrency)/filtered.length*100);
+
+    updateProgress((i + concurrency) / filtered.length * 100);
     await sleep(delayMs);
   }
 
-  sortTableByChange(false);
+  sortTableByChange(true);
   txt.textContent = `✅ Scan complete. Found ${found} EMA crosses.`;
   disableButtons(false);
   isScanning = false;
 
-  startAutoRefresh(mode); // start incremental refresh
+  startAutoRefresh(mode);
 }
 
-document.getElementById("greenBullish").onclick=()=>startScan("green_bullish");
-document.getElementById("redBullish").onclick=()=>startScan("red_bullish");
-document.getElementById("greenBearish").onclick=()=>startScan("green_bearish");
-document.getElementById("redBearish").onclick=()=>startScan("red_bearish");
+document.getElementById("greenBullish").onclick = () => startScan("green_bullish");
+document.getElementById("redBullish").onclick = () => startScan("red_bullish");
+document.getElementById("greenBearish").onclick = () => startScan("green_bearish");
+document.getElementById("redBearish").onclick = () => startScan("red_bearish");
 
 preloadCounts();
 setInterval(preloadCounts, 60000);
-                                                                    </script>
+    </script>
 </body>
 </html>
