@@ -260,42 +260,47 @@ async function fetchFundingRate(symbol) {
   }
 }
 
-async function processSymbol({ symbol, change }, mode){
+async function processSymbol({ symbol, change }, mode) {
   try {
-    // === Filters ===
-    if (Math.abs(change) < 10) return null; // at least ±10% 24h move
-
+    // === Basic Filters ===
     const funding = await fetchFundingRate(symbol);
-    if (mode.includes("bullish") && funding <= 0) return null;
-    if (mode.includes("bearish") && funding >= 0) return null;
+    if (funding <= 0) return null; // must have positive funding
+    if (Math.abs(change) < 10) return null; // must move >=10% in 24h
 
+    // === Load Candles ===
     const candles = await fetchCandles(symbol);
     if (!candles || candles.length < 100) return null;
 
-    const closes = candles.map(c => c.close);
+    const closes = candles.slice(-100).map(c => c.close);
     const ema70 = ema(closes, 70);
     const ema200 = ema(closes, 200);
     const last = ema70.length - 1;
+
     const isBullish = mode.includes("bullish");
-
-    // === Detect EMA cross ===
     let crossIdx = -1;
+
+    // === Detect EMA Cross ===
     for (let i = ema70.length - 2; i >= 0; i--) {
-  const prev70 = ema70[i], curr70 = ema70[i + 1];
-  const prev200 = ema200[i], curr200 = ema200[i + 1];
-  const crossedUp = prev70 < prev200 && curr70 > curr200;      // Bullish
-  const crossedDown = prev200 < prev70 && curr200 > curr70;    // Bearish (EMA200 crosses above EMA70)
-  if (isBullish && crossedUp) { crossIdx = i + 1; break; }
-  else if (!isBullish && crossedDown) { crossIdx = i + 1; break; }
-}
-    if (crossIdx === -1) return null;
+      const prev70 = ema70[i], curr70 = ema70[i + 1];
+      const prev200 = ema200[i], curr200 = ema200[i + 1];
 
+      const crossedUp = prev70 < prev200 && curr70 > curr200;     // Bullish cross
+      const crossedDown = prev200 < prev70 && curr200 > curr70;   // Bearish cross (EMA200 above EMA70)
+
+      if (isBullish && crossedUp) { crossIdx = i + 1; break; }
+      else if (!isBullish && crossedDown) { crossIdx = i + 1; break; }
+    }
+
+    if (crossIdx === -1) return null; // no cross found
+
+    // Only recent crosses (within last 20 bars)
     const barsAgo = ema70.length - 1 - crossIdx;
-    if (barsAgo > 20) return null; // only recent crosses
+    if (barsAgo > 20) return null;
 
-    const crossTime = new Date(candles[crossIdx].time)
-      .toLocaleTimeString("en-US",{hour12:false});
+    const crossTime = new Date(candles[candles.length - 100 + crossIdx].time)
+      .toLocaleTimeString("en-US", { hour12: false });
 
+    // === Return simplified data ===
     return {
       symbol,
       change,
@@ -307,7 +312,7 @@ async function processSymbol({ symbol, change }, mode){
       crossType: isBullish ? "🟩 EMA70→200 Cross" : "🟥 EMA200→70 Cross"
     };
 
-  } catch (err){
+  } catch (err) {
     console.error(`Error processing ${symbol}:`, err.message);
     return null;
   }
