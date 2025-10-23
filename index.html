@@ -262,16 +262,17 @@ async function processSymbol({ symbol, change }, mode){
     const candles = await fetchCandles(symbol);
     if(!candles || candles.length < 300) return null;
 
-    // === Restrict strictly to today (current UTC day) ===
+    // === Restrict strictly to today (Philippine time, UTC+8) ===
 const now = new Date();
-const utcDayStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-const utcDayEnd = utcDayStart + 24 * 60 * 60 * 1000;
+const phOffset = 8 * 60 * 60 * 1000;
+const phDayStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - phOffset;
+const phDayEnd = phDayStart + 24 * 60 * 60 * 1000;
 
 const dailyWindow = candles.filter(c => {
   const t = new Date(c.time).getTime();
-  return t >= utcDayStart && t < utcDayEnd;
+  return t >= phDayStart && t < phDayEnd;
 });
-
+    
     if(dailyWindow.length < 96) return null;
 
     const closes = dailyWindow.map(c=>c.close);
