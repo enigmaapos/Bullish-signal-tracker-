@@ -296,8 +296,8 @@ async function fetchFundingRate(symbol) {
 
 async function processSymbol({ symbol, change }, mode){
   try {
-    if (mode.includes("bullish") && change < 0) return null;
-    if (mode.includes("bearish") && change > 0) return null;
+    if (mode.includes("bullish") && funding <= 0) return null;
+if (mode.includes("bearish") && funding >= 0) return null;
 
     const funding = await fetchFundingRate(symbol);
     if (funding <= 0) return null;
