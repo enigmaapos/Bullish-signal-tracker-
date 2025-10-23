@@ -335,19 +335,41 @@ async function processSymbol({ symbol, change }, mode){
     if (!hasCandleInside) return null;
 
     let crossIdx = -1;
-      for (let i = ema70.length - 2; i >= 0; i--) {
-      const prev70 = ema70[i], curr70 = ema70[i + 1];
-      const prev200 = ema200[i], curr200 = ema200[i + 1];
 
-      const crossedUp = prev70 < prev200 && curr70 > curr200;     // Bullish cross
-      const crossedDown = prev200 < prev70 && curr200 > curr70;   // Bearish cross (EMA200 above EMA70)
+// Loop through the last 100 candles only (to find recent cross)
+const lookback = 100;
+for (let i = ema70.length - lookback - 1; i < ema70.length - 1; i++) {
+  const prev70 = ema70[i];
+  const curr70 = ema70[i + 1];
+  const prev200 = ema200[i];
+  const curr200 = ema200[i + 1];
 
-      if (isBullish && crossedUp) { crossIdx = i + 1; break; }
-      else if (!isBullish && crossedDown) { crossIdx = i + 1; break; }
-    }
+  const crossedUp = prev70 < prev200 && curr70 > curr200;     // Bullish cross
+  const crossedDown = prev70 > prev200 && curr70 < curr200;   // Bearish cross
 
-    if (crossIdx === -1) return null; // no cross found
+  if (isBullish && crossedUp) {
+    crossIdx = i + 1;
+    break;
+  } else if (!isBullish && crossedDown) {
+    crossIdx = i + 1;
+    break;
+  }
+}
 
+// If no crossover found recently → skip
+if (crossIdx === -1) return null;
+
+// Now verify current EMA relationship
+const lastIdx = ema70.length - 1;
+const currentlyBullish = ema70[lastIdx] > ema200[lastIdx];
+const currentlyBearish = ema70[lastIdx] < ema200[lastIdx];
+
+// Confirm the type matches the current condition
+if (isBullish && !currentlyBullish) return null;
+if (!isBullish && !currentlyBearish) return null;
+
+// ✅ If we reach here, a true cross happened within 100 candles
+// and EMAs are still aligned in that direction.
 
     const rsi = calcRSI(closes,14);
     const rsiNow = rsi[rsi.length-1].toFixed(1);
