@@ -333,6 +333,20 @@ function startAutoRefresh(mode){
   }, autoRefreshInterval);
 }
 
+              function sortTableByChange(ascending = false) {
+  const tbody = document.getElementById("results");
+  const rows = Array.from(tbody.querySelectorAll("tr"));
+
+  rows.sort((a, b) => {
+    const valA = parseFloat(a.children[1].textContent.replace('%', ''));
+    const valB = parseFloat(b.children[1].textContent.replace('%', ''));
+    return ascending ? valA - valB : valB - valA;
+  });
+
+  tbody.innerHTML = "";
+  rows.forEach(r => tbody.appendChild(r));
+              }
+
 async function startScan(mode, auto=false){
   if(isScanning){
     if(!auto) alert("⚠️ Scan already running. Wait...");
@@ -388,6 +402,9 @@ async function startScan(mode, auto=false){
     updateProgress((i+concurrency)/filtered.length*100);
     await sleep(delayMs);
   }
+
+              // After your for loop finishes
+sortTableByChange(false); // false = descending (highest to lowest)
 
   txt.textContent = `✅ ${auto ? "Auto-update complete" : "Scan complete"}. Found ${found} EMA crosses.`;
   disableButtons(false);
