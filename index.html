@@ -166,29 +166,31 @@
     <div id="progressText" style="text-align:center; margin-bottom:10px;"></div>
 
     <table>
-      <thead>
-        <tr>
-          <th>Pair</th>
-          <th>24h Change %</th>
-          <th>EMA14</th>
-          <th>EMA70</th>
-          <th>EMA200</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody id="results"></tbody>
-    </table>
+  <thead>
+    <tr>
+      <th>Pair</th>
+      <th>24h Change %</th>
+      <th>EMA14</th>
+      <th>EMA70</th>
+      <th>EMA200</th>
+      <th>Vol Now</th>
+      <th>Avg Vol</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody id="results"></tbody>
+</table>
   </div>
 
-<script>
+  <script>
 const apiBase = "https://fapi.binance.com";
 const tf = "15m";
 const candlesLimit = 200;
-const concurrency = 10;       // ✅ 10 pairs per batch
-const delayMs = 1000;         // ✅ 1s between batches (10/sec → safe)
+const concurrency = 10;
+const delayMs = 1000;
 const recentLimit = 25;
-const cooldownMs = 30000;     // ✅ manual click cooldown
-const autoRefreshInterval = 5 * 60 * 1000; // ✅ 5-minute auto-update
+const cooldownMs = 30000;
+const autoRefreshInterval = 5 * 60 * 1000;
 
 let isScanning = false;
 let lastScanTime = 0;
@@ -218,10 +220,14 @@ function findBearishCross(ema70, ema200){
   return -1;
 }
 
+// ✅ Fetch closes and volumes
 async function fetchCandles(symbol){
   const res = await fetch(`${apiBase}/fapi/v1/klines?symbol=${symbol}&interval=${tf}&limit=${candlesLimit}`);
   const data = await res.json();
-  return data.map(c=>parseFloat(c[4]));
+  return data.map(c=>({
+    close: parseFloat(c[4]),
+    volume: parseFloat(c[5])
+  }));
 }
 
 async function get24hSymbols(){
@@ -243,30 +249,49 @@ async function preloadCounts(){
 
 async function processSymbol({symbol, change}, mode){
   try{
-    const closes = await fetchCandles(symbol);
+    const candles = await fetchCandles(symbol);
+    const closes = candles.map(c=>c.close);
+    const volumes = candles.map(c=>c.volume);
+
     const ema14 = ema(closes,14);
     const ema70 = ema(closes,70);
     const ema200 = ema(closes,200);
     const last = ema14.length - 1;
 
     const isBullish = mode.includes("bullish");
-    const crossIdx = isBullish 
+    const crossIdx = isBullish
       ? findBullishCross(ema70, ema200)
       : findBearishCross(ema70, ema200);
 
-    // ❌ Ignore if no actual EMA70–EMA200 cross detected
+    // ❌ Ignore if no actual EMA70–EMA200 cross
     if (crossIdx === -1) return null;
 
     const barsAgo = ema70.length - 1 - crossIdx;
-    // ❌ Ignore if cross is too old
     if (barsAgo > recentLimit) return null;
 
-    // ✅ Keep only if EMA70 actually crossed EMA200 and the structure remains aligned
-    const valid = isBullish
-      ? (ema70[last] > ema200[last] && ema14[last] > ema70[last])
-      : (ema70[last] < ema200[last] && ema14[last] < ema70[last]);
+    // ✅ Trend alignment
+    const aligned = isBullish
+      ? (ema14[last] > ema70[last] && ema70[last] > ema200[last])
+      : (ema14[last] < ema70[last] && ema70[last] < ema200[last]);
+    if (!aligned) return null;
 
-    if (!valid) return null;
+    // 📊 Volume breakout detection
+    const lookback = 30;
+    const recentVols = volumes.slice(-lookback);
+    const avgVol = recentVols.reduce((a,b)=>a+b,0)/lookback;
+    const volNow = volumes[last];
+    const volBreakout = volNow > avgVol * 1.5;
+
+    // 💥 Price breakout detection
+    const recentPrices = closes.slice(-lookback);
+    const highRecent = Math.max(...recentPrices);
+    const lowRecent = Math.min(...recentPrices);
+    const priceNow = closes[last];
+    const priceBreakout = isBullish ? priceNow > highRecent : priceNow < lowRecent;
+
+    // ✅ Confirm both conditions
+    const breakoutConfirmed = volBreakout && priceBreakout;
+    if (!breakoutConfirmed) return null;
 
     return {
       symbol,
@@ -274,6 +299,8 @@ async function processSymbol({symbol, change}, mode){
       e14: ema14[last].toFixed(2),
       e70: ema70[last].toFixed(2),
       e200: ema200[last].toFixed(2),
+      volNow: volNow.toFixed(0),
+      avgVol: avgVol.toFixed(0),
       barsAgo,
       mode
     };
@@ -290,17 +317,15 @@ function updateProgress(percent){
   document.getElementById("progress-bar").style.width = `${Math.min(100,percent)}%`;
 }
 
-// === Auto-refresh system ===
-function startAutoRefresh(mode) {
-  if (autoRefreshTimer) clearInterval(autoRefreshTimer);
-  autoRefreshTimer = setInterval(() => {
+function startAutoRefresh(mode){
+  if(autoRefreshTimer) clearInterval(autoRefreshTimer);
+  autoRefreshTimer = setInterval(()=>{
     console.log(`🔁 Auto-refreshing ${mode} scan...`);
     startScan(mode, true);
   }, autoRefreshInterval);
 }
 
-// === Main scanner ===
-async function startScan(mode, auto = false){
+async function startScan(mode, auto=false){
   if(isScanning){
     if(!auto) alert("⚠️ Scan already running. Wait...");
     return;
@@ -344,8 +369,10 @@ async function startScan(mode, auto = false){
         <td>${r.symbol}</td>
         <td style="color:${r.change>0?"#00ff88":"#ff5555"}">${r.change.toFixed(2)}%</td>
         <td>${r.e14}</td><td>${r.e70}</td><td>${r.e200}</td>
+        <td>${r.volNow}</td><td>${r.avgVol}</td>
         <td class="${r.mode.includes("bullish")?'ok':'bear'}">
-          ${r.mode.includes("bullish")?'✅ Bullish':'⚠️ Bearish'} (${r.barsAgo} candles ago)
+          ${r.mode.includes("bullish")?'✅ Bullish Breakout':'⚠️ Bearish Breakout'}
+          (${r.barsAgo} candles ago)
         </td>
       </tr>`;
       resultsEl.insertAdjacentHTML("beforeend", row);
@@ -354,22 +381,20 @@ async function startScan(mode, auto = false){
     await sleep(delayMs);
   }
 
-  txt.textContent = `✅ ${auto ? "Auto-update complete" : "Scan complete"}. Found ${found} crosses.`;
+  txt.textContent = `✅ ${auto ? "Auto-update complete" : "Scan complete"}. Found ${found} breakout crosses.`;
   disableButtons(false);
   isScanning = false;
 
-  if(!auto) startAutoRefresh(mode); // ✅ enable auto-update after first manual scan
+  if(!auto) startAutoRefresh(mode);
 }
 
-// === UI bindings ===
 document.getElementById("greenBullish").onclick=()=>startScan("green_bullish");
 document.getElementById("redBullish").onclick=()=>startScan("red_bullish");
 document.getElementById("greenBearish").onclick=()=>startScan("green_bearish");
 document.getElementById("redBearish").onclick=()=>startScan("red_bearish");
 
-// === preload counters ===
 preloadCounts();
-setInterval(preloadCounts, 60000); // update green/red counts every 60 s
-      </script>
+setInterval(preloadCounts, 60000);
+    </script>
 </body>
 </html>
