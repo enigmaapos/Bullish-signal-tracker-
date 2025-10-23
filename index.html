@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Binance Futures EMA Cross Detector</title>
-  <style>
+<style>
   :root {
     --bg: #0e1117;
     --card: #161b22;
@@ -12,8 +12,6 @@
     --accent: #f1c40f;
     --bull: #00ff88;
     --bear: #ff5555;
-    --bull-bg: rgba(0, 255, 136, 0.15);  /* 🟢 for high-vol bearish */
-    --bear-bg: rgba(255, 85, 85, 0.15);  /* 🔴 for high-vol bullish */
   }
 
   body {
@@ -134,31 +132,11 @@
   .ok { color: var(--bull); font-weight: bold; }
   .bear { color: var(--bear); font-weight: bold; }
 
-  /* ✨ High-Volume Highlight Rows */
-  .highvol-bullish {
-    background: var(--bear-bg) !important;
-    animation: glowRed 1.5s ease-out;
-  }
-  .highvol-bearish {
-    background: var(--bull-bg) !important;
-    animation: glowGreen 1.5s ease-out;
-  }
-
-  /* ✨ Glow Animation */
-  @keyframes glowRed {
-    from { box-shadow: 0 0 12px rgba(255,85,85,0.8); }
-    to { box-shadow: 0 0 0 rgba(0,0,0,0); }
-  }
-  @keyframes glowGreen {
-    from { box-shadow: 0 0 12px rgba(0,255,136,0.8); }
-    to { box-shadow: 0 0 0 rgba(0,0,0,0); }
-  }
-
   @media (max-width: 700px) {
     table { font-size: 12px; }
     th, td { padding: 6px; }
   }
-  </style>
+</style>
 </head>
 <body>
   <h1>Binance Futures EMA Cross Detector</h1>
@@ -205,7 +183,7 @@
 </table>
   </div>
 
-<script>
+      <script>
 const apiBase = "https://fapi.binance.com";
 const tf = "15m";
 const candlesLimit = 500;
@@ -234,11 +212,7 @@ async function fetchCandles(symbol){
   const data = await res.json();
   return data.map(c=>({
     time: c[0],
-    open: parseFloat(c[1]),
-    high: parseFloat(c[2]),
-    low: parseFloat(c[3]),
-    close: parseFloat(c[4]),
-    volume: parseFloat(c[5])
+    close: parseFloat(c[4])
   }));
 }
 
@@ -302,9 +276,6 @@ async function processSymbol({ symbol, change }, mode){
     const funding = await fetchFundingRate(symbol);
     if (funding <= 0) return null;
 
-    // ⚡ Skip if 24h price change is less than ±10%
-    if (Math.abs(change) < 10) return null;
-
     const candles = await fetchCandles(symbol);
     if(!candles || candles.length < 300) return null;
 
@@ -327,7 +298,7 @@ async function processSymbol({ symbol, change }, mode){
     const last = ema70.length - 1;
     const isBullish = mode.includes("bullish");
 
-    // 🔍 Require at least one candle close inside EMA70–EMA200 range
+    // 🔍 New: check for any candle close inside EMA70–EMA200 range
     const hasCandleInside = dailyWindow.some((c, idx) => {
       if (idx >= ema70.length) return false;
       const close = c.close;
@@ -351,33 +322,11 @@ async function processSymbol({ symbol, change }, mode){
 
     if(crossIdx===-1) return null;
 
-    // 🧩 Detect ONLY red high-volume candles AFTER the cross
-    const volValues = dailyWindow.map(c => c.volume);
-    const avgVol = volValues.reduce((a, b) => a + b, 0) / volValues.length;
-    const volThreshold = avgVol * 2; // 2× average volume = high volume
-
-    let redHighVolDetected = false;
-    for (let i = crossIdx + 1; i <= Math.min(dailyWindow.length - 1, crossIdx + 5); i++) {
-      const c = dailyWindow[i];
-      const isRed = c.close < c.open;
-      if (isRed && c.volume >= volThreshold) {
-        redHighVolDetected = true;
-        break;
-      }
-    }
-
-    // ❌ Skip if no red high-volume candle after cross
-    if (!redHighVolDetected) return null;
-
     const rsi = calcRSI(closes,14);
     const rsiNow = rsi[rsi.length-1].toFixed(1);
     const barsAgo = ema70.length - 1 - crossIdx;
     const crossTime = new Date(dailyWindow[crossIdx].time)
       .toLocaleTimeString("en-US",{hour12:false});
-
-    const crossType = isBullish
-      ? "🟩 EMA70→200 Cross 🔴 Red High Vol"
-      : "🟥 EMA200→70 Cross 🔴 Red High Vol";
 
     return {
       symbol,
@@ -388,8 +337,7 @@ async function processSymbol({ symbol, change }, mode){
       rsiNow,
       crossTime,
       barsAgo,
-      crossType,
-      redHighVolDetected
+      crossType: isBullish ? "🟩 EMA70→200 Cross" : "🟥 EMA200→70 Cross"
     };
 
   } catch (err){
@@ -466,8 +414,7 @@ async function startScan(mode, auto=false){
       if(!r) return;
       found++;
       document.getElementById("foundCount").textContent = found;
-
-      const row = `<tr class="${r.redHighVolDetected ? "highvol-bullish" : ""}">
+      const row = `<tr>
         <td>${r.symbol}</td>
         <td style="color:${r.change>0?"#00ff88":"#ff5555"}">${r.change.toFixed(2)}%</td>
         <td>${r.funding.toFixed(4)}%</td>
@@ -484,7 +431,7 @@ async function startScan(mode, auto=false){
     await sleep(delayMs);
   }
 
-  sortTableByChange(false);
+  sortTableByChange(false); // sort descending
   txt.textContent = `✅ ${auto ? "Auto-update complete" : "Scan complete"}. Found ${found} EMA crosses.`;
   disableButtons(false);
   isScanning = false;
@@ -498,6 +445,6 @@ document.getElementById("redBearish").onclick=()=>startScan("red_bearish");
 
 preloadCounts();
 setInterval(preloadCounts, 60000);
-        </script>
+    </script>
 </body>
 </html>
