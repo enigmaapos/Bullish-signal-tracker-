@@ -175,7 +175,6 @@
       <th>EMA200</th>
       <th>RSI A</th>
       <th>RSI Now</th>
-      <th>Volume</th>
       <th>Status</th>
     </tr>
   </thead>
@@ -273,12 +272,11 @@ async function preloadCounts(){
   return rsi;
     }
 
-
     async function processSymbol({ symbol, change }, mode) {
   try {
     // === Quick 24h color filter to speed up scanning ===
-    if (mode.includes("bullish") && change < 0) return null;
-    if (mode.includes("bearish") && change > 0) return null;
+    if (mode.includes("bullish") && change < 0) return null; // skip red coins
+    if (mode.includes("bearish") && change > 0) return null; // skip green coins
 
     // === Fetch candle data ===
     const candles = await fetchCandles(symbol);
@@ -309,7 +307,7 @@ async function preloadCounts(){
 
     if (crossIdx === -1) return null;
     const barsAgo = ema70.length - 1 - crossIdx;
-    if (barsAgo > 50) return null;
+    if (barsAgo > 50) return null; // ignore older crosses
 
     // === RSI Calculation ===
     function calcRSI(values, period = 14) {
@@ -337,32 +335,26 @@ async function preloadCounts(){
 
     // === Define RSI window around the cross ===
     const beforeStart = Math.max(0, crossIdx - 25);
-    const afterEnd = Math.min(rsi.length - 1, crossIdx + 25);
-    const rsiBefore = rsi.slice(beforeStart, crossIdx);
-    const rsiAfter = rsi.slice(crossIdx, afterEnd);
+    const afterEnd    = Math.min(rsi.length - 1, crossIdx + 25);
+    const rsiBefore   = rsi.slice(beforeStart, crossIdx);
+    const rsiAfter    = rsi.slice(crossIdx, afterEnd);
 
     if (rsiBefore.length < 5 || rsiAfter.length < 1) return null;
 
-    // === Find RSI and Price Points A & B ===
-    const idxA = isBullish
-      ? beforeStart + rsiBefore.indexOf(Math.max(...rsiBefore))
-      : beforeStart + rsiBefore.indexOf(Math.min(...rsiBefore));
-    const idxB = isBullish
-      ? crossIdx + rsiAfter.indexOf(Math.max(...rsiAfter))
-      : crossIdx + rsiAfter.indexOf(Math.min(...rsiAfter));
+    // === RSI Points A & B ===
+    const rsiA = isBullish
+      ? Math.max(...rsiBefore) // highest RSI before cross
+      : Math.min(...rsiBefore); // lowest RSI before cross
 
-    const rsiA = rsi[idxA];
-    const rsiB = rsi[idxB];
-    const priceA = closes[idxA];
-    const priceB = closes[idxB];
+    const rsiB = isBullish
+      ? Math.max(...rsiAfter)  // highest RSI after cross
+      : Math.min(...rsiAfter); // lowest RSI after cross
 
-    // === True divergence logic ===
-    const bullishDiv = isBullish && priceB < priceA && rsiB > rsiA;
-    const bearishDiv = !isBullish && priceB > priceA && rsiB < rsiA;
-    const divergent = bullishDiv || bearishDiv;
+    // Divergence check: RSI B must not exceed RSI A
+    const divergent = isBullish ? rsiB < rsiA : rsiB > rsiA;
     if (!divergent) return null;
 
-    // === Return result ===
+    // === Return final result ===
     return {
       symbol,
       change,
@@ -371,13 +363,13 @@ async function preloadCounts(){
       barsAgo,
       rsiA: rsiA.toFixed(1),
       rsiB: rsiB.toFixed(1),
-      priceA: priceA.toFixed(6),
-      priceB: priceB.toFixed(6),
+      beforeStart,
+      afterEnd,
       ema14_last: ema14[last].toFixed(2),
       ema70_last: ema70[last].toFixed(2),
       ema200_last: ema200[last].toFixed(2),
       crossType: isBullish ? "🟩 Bullish Cross" : "🟥 Bearish Cross",
-      note: "✅ True RSI–Price divergence confirmed"
+      note: "RSI divergence confirmed"
     };
 
   } catch (err) {
@@ -446,12 +438,6 @@ for (let i = 0; i < filtered.length; i += concurrency) {
     found++;
     document.getElementById("foundCount").textContent = found;
 
-    // volume color & icon
-    let volIcon = "";
-    if (r.volTrend > 0) volIcon = "🟢⬆️";
-    else if (r.volTrend < 0) volIcon = "🔴⬇️";
-    else volIcon = "⚪️";
-
     const row = `
       <tr>
         <td>${r.symbol}</td>
@@ -463,7 +449,6 @@ for (let i = 0; i < filtered.length; i += concurrency) {
         <td>${r.e200}</td>
         <td>${r.rsiA}</td>
         <td>${r.rsiNow}</td>
-        <td>${volIcon} ${r.volTrend.toFixed(2)}%</td>
         <td class="${r.mode.includes("bullish") ? "ok" : "bear"}">
           ${r.mode.includes("bullish") ? "✅ Bullish Breakout" : "⚠️ Bearish Breakout"}
           (${r.barsAgo} candles ago)
