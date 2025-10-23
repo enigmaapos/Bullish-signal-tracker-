@@ -182,7 +182,7 @@
 </table>
   </div>
 
-            <script>
+                  <script>
 const apiBase = "https://fapi.binance.com";
 const tf = "15m";
 const candlesLimit = 500;
@@ -211,7 +211,8 @@ async function fetchCandles(symbol){
   const data = await res.json();
   return data.map(c=>({
     time: c[0],
-    close: parseFloat(c[4])
+    close: parseFloat(c[4]),
+    volume: parseFloat(c[5])
   }));
 }
 
@@ -262,27 +263,41 @@ async function processSymbol({ symbol, change }, mode){
     const candles = await fetchCandles(symbol);
     if(!candles || candles.length < 300) return null;
 
-    // === Restrict to daily window (previous → current day) ===
-const now = new Date();
-const utcDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-const prevDayStart = utcDay - 24*60*60*1000;
-const currDayEnd = utcDay + 24*60*60*1000;
+    // === Restrict strictly to today (current UTC day) ===
+    const now = new Date();
+    const utcDayStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const utcDayEnd = utcDayStart + 24 * 60 * 60 * 1000;
 
-const dailyWindow = candles.filter(c=>{
-  const t = new Date(c.time).getTime();
-  return t >= prevDayStart && t <= currDayEnd;
-});
-    
+    const dailyWindow = candles.filter(c=>{
+      const t = new Date(c.time).getTime();
+      return t >= utcDayStart && t < utcDayEnd;
+    });
+
     if(dailyWindow.length < 96) return null;
 
-    const closes = dailyWindow.map(c=>c.close);
+    // === Volume filter: last 3 daily candles rising in volume ===
+    // Aggregate volume into 3 daily candles (simulate from 15m)
+    const groupedByDay = {};
+    for(const c of candles){
+      const day = new Date(c.time).toISOString().split("T")[0];
+      groupedByDay[day] = (groupedByDay[day] || 0) + c.volume;
+    }
+    const dailyVolumes = Object.entries(groupedByDay)
+      .sort((a,b)=>new Date(a[0])-new Date(b[0]))
+      .map(e=>e[1]);
+    const volLen = dailyVolumes.length;
+    const vols = dailyVolumes.slice(volLen-3);
+    const risingVolume = vols.length===3 && vols[0]<vols[1] && vols[1]<vols[2];
+    if(!risingVolume) return null;
 
+    // === EMA and RSI calculations ===
+    const closes = dailyWindow.map(c=>c.close);
     const ema70 = ema(closes, 70);
     const ema200 = ema(closes, 200);
     const last = ema70.length - 1;
     const isBullish = mode.includes("bullish");
 
-    // === Real cross detection ===
+    // === Detect EMA cross ===
     let crossIdx = -1;
     for(let i=ema70.length-2;i>=0;i--){
       const prev70=ema70[i], curr70=ema70[i+1];
@@ -295,6 +310,7 @@ const dailyWindow = candles.filter(c=>{
 
     if(crossIdx===-1) return null;
 
+    // === RSI and summary ===
     const rsi = calcRSI(closes,14);
     const rsiNow = rsi[rsi.length-1].toFixed(1);
     const barsAgo = ema70.length - 1 - crossIdx;
@@ -403,6 +419,6 @@ document.getElementById("redBearish").onclick=()=>startScan("red_bearish");
 
 preloadCounts();
 setInterval(preloadCounts, 60000);
-            </script>
+      </script>
 </body>
 </html>
