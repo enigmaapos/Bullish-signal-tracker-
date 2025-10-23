@@ -185,33 +185,35 @@
     <div id="progress-container"><div id="progress-bar"></div></div>
     <div id="progressText" style="text-align:center; margin-bottom:10px;"></div>
 
-<div class="table-container">
-  <table>
-    <thead>
-      <tr>
-        <th>Pair</th>
-        <th>24h Change %</th>
-        <th>Funding</th>
-        <th>EMA70</th>
-        <th>EMA200</th>
-        <th>Cross Type</th>
-        <th>Cross Time</th>
-        <th>Bars Ago</th>
-      </tr>
-    </thead>
-    <tbody id="results"></tbody>
-  </table>
-</div>
+    <div class="table-container">
+    <table>
+  <thead>
+    <tr>
+      <th>Pair</th>
+      <th>24h Change %</th>
+      <th>Funding</th>
+      <th>EMA70</th>
+      <th>EMA200</th>
+      <th>RSI Now</th>
+      <th>Cross Type</th>
+      <th>Cross Time</th>
+      <th>Bars Ago</th>
+    </tr>
+  </thead>
+  <tbody id="results"></tbody>
+</table>
+  </div>
+  </div>
 
-<script>
+           <script>
 const apiBase = "https://fapi.binance.com";
 const tf = "15m";
 const candlesLimit = 500;
 const concurrency = 10;
 const delayMs = 1000;
 const cooldownMs = 30000;
-const batchSize = 20;
-const batchRefreshDelay = 10000;
+const batchSize = 20; // refresh batch size
+const batchRefreshDelay = 10000; // 10s between batch refreshes
 
 let isScanning = false;
 let lastScanTime = 0;
@@ -237,6 +239,7 @@ async function fetchCandles(symbol){
     time: c[0],
     open: parseFloat(c[1]),
     close: parseFloat(c[4]),
+    volume: parseFloat(c[5])
   }));
 }
 
@@ -249,6 +252,37 @@ async function get24hSymbols(){
   }));
 }
 
+async function preloadCounts(){
+  const tickers = await get24hSymbols();
+  const greens = tickers.filter(t=>t.change>0 && t.symbol.endsWith("USDT")).length;
+  const reds = tickers.filter(t=>t.change<0 && t.symbol.endsWith("USDT")).length;
+  document.getElementById("greenCount").textContent = greens;
+  document.getElementById("redCount").textContent = reds;
+}
+
+function calcRSI(closes, period = 14){
+  let gains = 0, losses = 0;
+  for(let i=1;i<=period;i++){
+    const diff = closes[i]-closes[i-1];
+    if(diff>=0) gains+=diff; else losses-=diff;
+  }
+  let avgGain = gains/period;
+  let avgLoss = losses/period;
+  const rsiArr = [];
+  for(let i=period;i<closes.length;i++){
+    const diff = closes[i]-closes[i-1];
+    const gain = Math.max(0,diff);
+    const loss = Math.max(0,-diff);
+    avgGain = (avgGain*(period-1)+gain)/period;
+    avgLoss = (avgLoss*(period-1)+loss)/period;
+    const rs = avgLoss===0 ? 100 : 100 - 100/(1+avgGain/avgLoss);
+    rsiArr.push(rs);
+  }
+  while(rsiArr.length < closes.length) rsiArr.unshift(rsiArr[0] || 50);
+  return rsiArr;
+}
+
+// ✅ Fetch recent funding rate (Binance Futures)
 async function fetchFundingRate(symbol) {
   try {
     const res = await fetch(`${apiBase}/fapi/v1/fundingRate?symbol=${symbol}&limit=1`);
@@ -260,27 +294,48 @@ async function fetchFundingRate(symbol) {
   }
 }
 
-async function processSymbol({ symbol, change }, mode) {
+async function processSymbol({ symbol, change }, mode){
   try {
-    // === Basic Filters ===
+    if (mode.includes("bullish") && change < 0) return null;
+    if (mode.includes("bearish") && change > 0) return null;
+
     const funding = await fetchFundingRate(symbol);
-    if (funding <= 0) return null; // must have positive funding
-    if (Math.abs(change) < 10) return null; // must move >=10% in 24h
+    if (funding <= 0) return null;
 
-    // === Load Candles ===
+    if (Math.abs(change) < 10) return null;
+
     const candles = await fetchCandles(symbol);
-    if (!candles || candles.length < 100) return null;
+    if(!candles || candles.length < 300) return null;
 
-    const closes = candles.slice(-100).map(c => c.close);
+    const now = new Date();
+    const utcDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const prevDayStart = utcDay - 24*60*60*1000;
+    const currDayEnd = utcDay + 24*60*60*1000;
+
+    const dailyWindow = candles.filter(c=>{
+      const t = new Date(c.time).getTime();
+      return t >= prevDayStart && t <= currDayEnd;
+    });
+    if(dailyWindow.length < 96) return null;
+
+    const closes = dailyWindow.map(c=>c.close);
     const ema70 = ema(closes, 70);
     const ema200 = ema(closes, 200);
     const last = ema70.length - 1;
-
     const isBullish = mode.includes("bullish");
-    let crossIdx = -1;
 
-    // === Detect EMA Cross ===
-    for (let i = ema70.length - 2; i >= 0; i--) {
+    const hasCandleInside = dailyWindow.some((c, idx) => {
+      if (idx >= ema70.length) return false;
+      const close = c.close;
+      return (
+        close >= Math.min(ema70[idx], ema200[idx]) &&
+        close <= Math.max(ema70[idx], ema200[idx])
+      );
+    });
+    if (!hasCandleInside) return null;
+
+    let crossIdx = -1;
+      for (let i = ema70.length - 2; i >= 0; i--) {
       const prev70 = ema70[i], curr70 = ema70[i + 1];
       const prev200 = ema200[i], curr200 = ema200[i + 1];
 
@@ -293,26 +348,26 @@ async function processSymbol({ symbol, change }, mode) {
 
     if (crossIdx === -1) return null; // no cross found
 
-    // Only recent crosses (within last 20 bars)
+
+    const rsi = calcRSI(closes,14);
+    const rsiNow = rsi[rsi.length-1].toFixed(1);
     const barsAgo = ema70.length - 1 - crossIdx;
-    if (barsAgo > 20) return null;
+    const crossTime = new Date(dailyWindow[crossIdx].time)
+      .toLocaleTimeString("en-US",{hour12:false});
 
-    const crossTime = new Date(candles[candles.length - 100 + crossIdx].time)
-      .toLocaleTimeString("en-US", { hour12: false });
-
-    // === Return simplified data ===
     return {
       symbol,
       change,
       funding,
       ema70: ema70[last].toFixed(2),
       ema200: ema200[last].toFixed(2),
+      rsiNow,
       crossTime,
       barsAgo,
       crossType: isBullish ? "🟩 EMA70→200 Cross" : "🟥 EMA200→70 Cross"
     };
 
-  } catch (err) {
+  } catch (err){
     console.error(`Error processing ${symbol}:`, err.message);
     return null;
   }
@@ -338,7 +393,7 @@ function sortTableByChange(ascending = false) {
   rows.forEach(r => tbody.appendChild(r));
 }
 
-// 🆕 Incremental batch refresh
+// 🆕 Incremental batch refresh system
 async function refreshBatch(mode) {
   if (!allSymbols.length || isScanning) return;
   isScanning = true;
@@ -351,14 +406,15 @@ async function refreshBatch(mode) {
 
   res.forEach(r => {
     if (!r) return;
-    let row = document.querySelector(`tr[data-symbol="${r.symbol}"]`);
-    if (row) {
-      row.innerHTML = `
+    let existingRow = document.querySelector(`tr[data-symbol="${r.symbol}"]`);
+    if (existingRow) {
+      existingRow.innerHTML = `
         <td>${r.symbol}</td>
         <td style="color:${r.change>0?"#00ff88":"#ff5555"}">${r.change.toFixed(2)}%</td>
         <td>${r.funding.toFixed(4)}%</td>
         <td>${r.ema70}</td>
         <td>${r.ema200}</td>
+        <td>${r.rsiNow}</td>
         <td>${r.crossType}</td>
         <td>${r.crossTime}</td>
         <td>${r.barsAgo}</td>
@@ -379,10 +435,15 @@ function startAutoRefresh(mode) {
 }
 
 async function startScan(mode, auto=false){
-  if (isScanning) return alert("⚠️ Scan already running. Wait...");
+  if(isScanning){
+    if(!auto) alert("⚠️ Scan already running. Wait...");
+    return;
+  }
+
   const now = Date.now();
-  if (!auto && (now - lastScanTime < cooldownMs))
+  if(!auto && (now - lastScanTime < cooldownMs)){
     return alert(`⏳ Wait ${(cooldownMs - (now - lastScanTime))/1000|0}s before rescanning.`);
+  }
 
   isScanning = true;
   lastScanTime = now;
@@ -394,7 +455,7 @@ async function startScan(mode, auto=false){
   resultsEl.innerHTML = "";
   document.getElementById("foundCount").textContent = 0;
 
-  txt.textContent = "Fetching 24h tickers...";
+  txt.textContent = auto ? "Auto-refreshing..." : "Fetching 24h tickers...";
   const tickers = await get24hSymbols();
   const filtered = tickers.filter(t=>{
     if(!t.symbol.endsWith("USDT")) return false;
@@ -403,8 +464,9 @@ async function startScan(mode, auto=false){
     return false;
   });
 
-  allSymbols = filtered;
+  allSymbols = filtered; // ✅ store for batch refreshes
   refreshIndex = 0;
+
   txt.textContent = `Scanning ${filtered.length} pairs...`;
 
   let found = 0;
@@ -414,6 +476,7 @@ async function startScan(mode, auto=false){
     res.forEach(r=>{
       if(!r) return;
       found++;
+      document.getElementById("foundCount").textContent = found;
       const row = document.createElement("tr");
       row.setAttribute("data-symbol", r.symbol);
       row.innerHTML = `
@@ -422,6 +485,7 @@ async function startScan(mode, auto=false){
         <td>${r.funding.toFixed(4)}%</td>
         <td>${r.ema70}</td>
         <td>${r.ema200}</td>
+        <td>${r.rsiNow}</td>
         <td>${r.crossType}</td>
         <td>${r.crossTime}</td>
         <td>${r.barsAgo}</td>
@@ -436,13 +500,17 @@ async function startScan(mode, auto=false){
   txt.textContent = `✅ Scan complete. Found ${found} EMA crosses.`;
   disableButtons(false);
   isScanning = false;
-  startAutoRefresh(mode);
+
+  startAutoRefresh(mode); // start incremental refresh
 }
 
 document.getElementById("greenBullish").onclick=()=>startScan("green_bullish");
 document.getElementById("redBullish").onclick=()=>startScan("red_bullish");
 document.getElementById("greenBearish").onclick=()=>startScan("green_bearish");
 document.getElementById("redBearish").onclick=()=>startScan("red_bearish");
-                              </script>
+
+preloadCounts();
+setInterval(preloadCounts, 60000);
+                                                                    </script>
 </body>
 </html>
