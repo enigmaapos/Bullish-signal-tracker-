@@ -183,7 +183,7 @@
 </table>
   </div>
 
-            <script>
+      <script>
 const apiBase = "https://fapi.binance.com";
 const tf = "15m";
 const candlesLimit = 500;
@@ -255,16 +255,17 @@ function calcRSI(closes, period = 14){
   return rsiArr;
 }
 
-              async function fetchFundingRate(symbol) {
+// ✅ Fetch recent funding rate (Binance Futures)
+async function fetchFundingRate(symbol) {
   try {
     const res = await fetch(`${apiBase}/fapi/v1/fundingRate?symbol=${symbol}&limit=1`);
     const data = await res.json();
     return parseFloat(data?.[0]?.fundingRate ?? 0);
   } catch (err) {
     console.warn(`Funding fetch failed for ${symbol}:`, err.message);
-    return 0; // default if API fails
+    return 0;
   }
-              }
+}
 
 async function processSymbol({ symbol, change }, mode){
   try {
@@ -279,20 +280,19 @@ async function processSymbol({ symbol, change }, mode){
     if(!candles || candles.length < 300) return null;
 
     // === Restrict to daily window (previous → current day) ===
-const now = new Date();
-const utcDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-const prevDayStart = utcDay - 24*60*60*1000;
-const currDayEnd = utcDay + 24*60*60*1000;
+    const now = new Date();
+    const utcDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const prevDayStart = utcDay - 24*60*60*1000;
+    const currDayEnd = utcDay + 24*60*60*1000;
 
-const dailyWindow = candles.filter(c=>{
-  const t = new Date(c.time).getTime();
-  return t >= prevDayStart && t <= currDayEnd;
-});
+    const dailyWindow = candles.filter(c=>{
+      const t = new Date(c.time).getTime();
+      return t >= prevDayStart && t <= currDayEnd;
+    });
     
     if(dailyWindow.length < 96) return null;
 
     const closes = dailyWindow.map(c=>c.close);
-
     const ema70 = ema(closes, 70);
     const ema200 = ema(closes, 200);
     const last = ema70.length - 1;
@@ -314,12 +314,13 @@ const dailyWindow = candles.filter(c=>{
     const rsi = calcRSI(closes,14);
     const rsiNow = rsi[rsi.length-1].toFixed(1);
     const barsAgo = ema70.length - 1 - crossIdx;
-    const crossTime = new Date(dailyWindow[crossIdx].time).toLocaleTimeString("en-US",{hour12:false});
+    const crossTime = new Date(dailyWindow[crossIdx].time)
+      .toLocaleTimeString("en-US",{hour12:false});
 
     return {
       symbol,
       change,
-      funding,
+      funding, // ✅ added
       ema70: ema70[last].toFixed(2),
       ema200: ema200[last].toFixed(2),
       rsiNow,
@@ -350,19 +351,17 @@ function startAutoRefresh(mode){
   }, autoRefreshInterval);
 }
 
-              function sortTableByChange(ascending = false) {
+function sortTableByChange(ascending = false) {
   const tbody = document.getElementById("results");
   const rows = Array.from(tbody.querySelectorAll("tr"));
-
   rows.sort((a, b) => {
     const valA = parseFloat(a.children[1].textContent.replace('%', ''));
     const valB = parseFloat(b.children[1].textContent.replace('%', ''));
     return ascending ? valA - valB : valB - valA;
   });
-
   tbody.innerHTML = "";
   rows.forEach(r => tbody.appendChild(r));
-              }
+}
 
 async function startScan(mode, auto=false){
   if(isScanning){
@@ -407,7 +406,7 @@ async function startScan(mode, auto=false){
       const row = `<tr>
         <td>${r.symbol}</td>
         <td style="color:${r.change>0?"#00ff88":"#ff5555"}">${r.change.toFixed(2)}%</td>
-        <td>${funding.toFixed(4)}%</td>
+        <td>${r.funding.toFixed(4)}%</td>
         <td>${r.ema70}</td>
         <td>${r.ema200}</td>
         <td>${r.rsiNow}</td>
@@ -421,13 +420,10 @@ async function startScan(mode, auto=false){
     await sleep(delayMs);
   }
 
-              // After your for loop finishes
-sortTableByChange(false); // false = descending (highest to lowest)
-
+  sortTableByChange(false); // sort descending
   txt.textContent = `✅ ${auto ? "Auto-update complete" : "Scan complete"}. Found ${found} EMA crosses.`;
   disableButtons(false);
   isScanning = false;
-
   if(!auto) startAutoRefresh(mode);
 }
 
@@ -438,6 +434,6 @@ document.getElementById("redBearish").onclick=()=>startScan("red_bearish");
 
 preloadCounts();
 setInterval(preloadCounts, 60000);
-            </script>
+    </script>
 </body>
 </html>
