@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Binance Futures EMA Cross Detector</title>
-<style>
+  <style>
   :root {
     --bg: #0e1117;
     --card: #161b22;
@@ -12,6 +12,8 @@
     --accent: #f1c40f;
     --bull: #00ff88;
     --bear: #ff5555;
+    --bull-bg: rgba(0, 255, 136, 0.15);  /* 🟢 for high-vol bearish */
+    --bear-bg: rgba(255, 85, 85, 0.15);  /* 🔴 for high-vol bullish */
   }
 
   body {
@@ -132,11 +134,31 @@
   .ok { color: var(--bull); font-weight: bold; }
   .bear { color: var(--bear); font-weight: bold; }
 
+  /* ✨ High-Volume Highlight Rows */
+  .highvol-bullish {
+    background: var(--bear-bg) !important;
+    animation: glowRed 1.5s ease-out;
+  }
+  .highvol-bearish {
+    background: var(--bull-bg) !important;
+    animation: glowGreen 1.5s ease-out;
+  }
+
+  /* ✨ Glow Animation */
+  @keyframes glowRed {
+    from { box-shadow: 0 0 12px rgba(255,85,85,0.8); }
+    to { box-shadow: 0 0 0 rgba(0,0,0,0); }
+  }
+  @keyframes glowGreen {
+    from { box-shadow: 0 0 12px rgba(0,255,136,0.8); }
+    to { box-shadow: 0 0 0 rgba(0,0,0,0); }
+  }
+
   @media (max-width: 700px) {
     table { font-size: 12px; }
     th, td { padding: 6px; }
   }
-</style>
+  </style>
 </head>
 <body>
   <h1>Binance Futures EMA Cross Detector</h1>
@@ -183,6 +205,7 @@
 </table>
   </div>
 
+
       <script>
 const apiBase = "https://fapi.binance.com";
 const tf = "15m";
@@ -212,7 +235,11 @@ async function fetchCandles(symbol){
   const data = await res.json();
   return data.map(c=>({
     time: c[0],
-    close: parseFloat(c[4])
+    open: parseFloat(c[1]),
+    high: parseFloat(c[2]),
+    low: parseFloat(c[3]),
+    close: parseFloat(c[4]),
+    volume: parseFloat(c[5])
   }));
 }
 
@@ -267,8 +294,7 @@ async function fetchFundingRate(symbol) {
   }
 }
 
-
-        async function processSymbol({ symbol, change }, mode){
+async function processSymbol({ symbol, change }, mode){
   try {
     if (mode.includes("bullish") && change < 0) return null;
     if (mode.includes("bearish") && change > 0) return null;
@@ -326,11 +352,31 @@ async function fetchFundingRate(symbol) {
 
     if(crossIdx===-1) return null;
 
+    // 🧩 Detect high-volume confirmation candle near cross
+    const volValues = dailyWindow.map(c=>c.volume);
+    const avgVol = volValues.reduce((a,b)=>a+b,0) / volValues.length;
+    const volThreshold = avgVol * 2; // 2× average volume = high volume
+
+    let highVolDetected = false;
+    for (let i = Math.max(0, crossIdx - 3); i <= Math.min(dailyWindow.length - 1, crossIdx + 3); i++) {
+      const c = dailyWindow[i];
+      const isGreen = c.close > c.open;
+      const isRed = c.close < c.open;
+      if (c.volume >= volThreshold) {
+        if (isBullish && isRed) highVolDetected = "red";
+        if (!isBullish && isGreen) highVolDetected = "green";
+      }
+    }
+
     const rsi = calcRSI(closes,14);
     const rsiNow = rsi[rsi.length-1].toFixed(1);
     const barsAgo = ema70.length - 1 - crossIdx;
     const crossTime = new Date(dailyWindow[crossIdx].time)
       .toLocaleTimeString("en-US",{hour12:false});
+
+    let crossType = isBullish ? "🟩 EMA70→200 Cross" : "🟥 EMA200→70 Cross";
+    if (highVolDetected === "red") crossType += " 🔴 High Vol";
+    if (highVolDetected === "green") crossType += " 🟢 High Vol";
 
     return {
       symbol,
@@ -341,16 +387,16 @@ async function fetchFundingRate(symbol) {
       rsiNow,
       crossTime,
       barsAgo,
-      crossType: isBullish ? "🟩 EMA70→200 Cross" : "🟥 EMA200→70 Cross"
+      crossType,
+      highVolDetected
     };
 
   } catch (err){
     console.error(`Error processing ${symbol}:`, err.message);
     return null;
   }
-        }
-        
-        
+}
+
 function disableButtons(state){
   document.querySelectorAll("button").forEach(btn=>btn.disabled=state);
 }
@@ -419,7 +465,13 @@ async function startScan(mode, auto=false){
       if(!r) return;
       found++;
       document.getElementById("foundCount").textContent = found;
-      const row = `<tr>
+
+      // 🎨 Highlight row background for high-volume crosses
+      let bgStyle = "";
+      if (r.highVolDetected === "red") bgStyle = "background-color: rgba(255, 0, 0, 0.2);";
+      if (r.highVolDetected === "green") bgStyle = "background-color: rgba(0, 255, 0, 0.2);";
+
+      const row = `<tr style="${bgStyle}">
         <td>${r.symbol}</td>
         <td style="color:${r.change>0?"#00ff88":"#ff5555"}">${r.change.toFixed(2)}%</td>
         <td>${r.funding.toFixed(4)}%</td>
@@ -436,7 +488,7 @@ async function startScan(mode, auto=false){
     await sleep(delayMs);
   }
 
-  sortTableByChange(false); // sort descending
+  sortTableByChange(false);
   txt.textContent = `✅ ${auto ? "Auto-update complete" : "Scan complete"}. Found ${found} EMA crosses.`;
   disableButtons(false);
   isScanning = false;
@@ -450,6 +502,6 @@ document.getElementById("redBearish").onclick=()=>startScan("red_bearish");
 
 preloadCounts();
 setInterval(preloadCounts, 60000);
-    </script>
+      </script>
 </body>
 </html>
