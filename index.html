@@ -1,217 +1,317 @@
-<!doctype html>
+<!DOCTYPE html><html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Binance Futures 24h Tracker & Altcoin Sentiment Dashboard</title>
+    <style>
+      :root {
+        font-family: 'Inter', 'Segoe UI', Roboto, Arial, sans-serif;
+        color: #0f172a;
+      }body {
+    margin: 0;
+    padding: 24px;
+    background: #f9fafb;
+  }
 
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Binance Futures 24h Tracker + Alt Sentiment</title>
-  <style>
-    :root{font-family:Inter,Segoe UI,Roboto,Arial,sans-serif;color:#0f172a}
-    body{margin:0;padding:20px;background:#f8fafc}
-    .card{background:#ffffff;border-radius:12px;padding:16px;box-shadow:0 6px 18px rgba(12,14,20,0.06);margin-bottom:12px}
-    .row{display:flex;gap:12px;align-items:center}
-    input,button,select{padding:8px 10px;border-radius:8px;border:1px solid #e6e9ef;font-size:14px}
-    h1{margin:0 0 8px 0;font-size:18px}
-    .muted{color:#64748b;font-size:13px}
-    .pct{font-weight:700}
-    .green{color:#0f9d58}
-    .red{color:#d32f2f}
-    table{width:100%;border-collapse:collapse;margin-top:8px}
-    th,td{padding:8px;text-align:left;border-bottom:1px solid #f1f5f9;font-size:13px}
-    th{color:#475569}
-    .small{font-size:12px;color:#64748b}
-    .badge{display:inline-block;padding:6px 10px;border-radius:999px;background:#eef2ff;color:#3730a3;font-weight:600}
-    .status{display:inline-flex;gap:8px;align-items:center}
-    .dot{width:10px;height:10px;border-radius:999px}
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="row" style="justify-content:space-between">
-      <div>
-        <h1>Binance Futures — 24h Price Change &amp; Alt Sentiment</h1>
-        <div class="muted">Tracks USDT-margined perpetuals via Binance Futures (fapi). Auto-refreshes.</div>
-      </div>
-      <div style="text-align:right">
-        <div class="small">Refresh interval: <span id="intervalLabel">15s</span></div>
-        <div class="small">Last update: <span id="lastUpdate">—</span></div>
-      </div>
-    </div>
-  </div>  <div class="card">
-    <div class="row">
-      <label for="symbol">Track symbol (USDT perpetual):</label>
-      <input id="symbol" value="BTCUSDT" />
-      <button id="trackBtn">Track</button>
-      <label class="small" style="margin-left:8px">Auto-refresh:</label>
-      <select id="interval">
-        <option value="5000">5s</option>
-        <option value="15000" selected>15s</option>
-        <option value="30000">30s</option>
-        <option value="60000">60s</option>
-      </select>
-    </div><div id="symbolCard" style="margin-top:12px"></div>
+  .card {
+    background: #ffffff;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.05);
+    margin-bottom: 16px;
+  }
 
-  </div>  <div class="card">
-    <div class="row" style="justify-content:space-between;align-items:flex-start">
-      <div style="flex:1;margin-right:12px">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <div>
-            <div class="muted">Market volume leaders</div>
-            <h2 id="volumeLeader" style="margin:2px 0;font-size:16px">—</h2>
-            <div class="small">(Compare 24h base asset volume of ETHUSDT vs BTCUSDT)</div>
+  .row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+
+  input,
+  button,
+  select {
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid #d1d5db;
+    font-size: 14px;
+  }
+
+  h1 {
+    margin: 0 0 6px 0;
+    font-size: 20px;
+    font-weight: 700;
+  }
+
+  h2 {
+    margin: 4px 0;
+    font-size: 16px;
+  }
+
+  .muted {
+    color: #6b7280;
+    font-size: 13px;
+  }
+
+  .pct {
+    font-weight: 700;
+  }
+
+  .green {
+    color: #16a34a;
+  }
+
+  .red {
+    color: #dc2626;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+  }
+
+  th,
+  td {
+    padding: 8px;
+    text-align: left;
+    border-bottom: 1px solid #e5e7eb;
+    font-size: 13px;
+  }
+
+  th {
+    color: #374151;
+    font-weight: 600;
+  }
+
+  .small {
+    font-size: 12px;
+    color: #6b7280;
+  }
+
+  .status {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+</style>
+
+  </head>  <body>
+    <div class="card">
+      <div class="row" style="justify-content: space-between">
+        <div>
+          <h1>Binance Futures — 24h Price Change & Altcoin Sentiment</h1>
+          <div class="muted">
+            Real-time tracker for USDT-margined perpetual contracts using Binance
+            Futures (fapi).
           </div>
-          <div class="status">
-            <div id="sentimentDot" class="dot" style="background:#cbd5e1"></div>
-            <div id="sentimentLabel" style="font-weight:700">—</div>
-          </div>
-        </div><div style="margin-top:12px">
-      <div class="muted">Top alt 24h movers (USDT perpetuals, exclude BTC/ETH)</div>
-      <table id="altsTable">
-        <thead>
-          <tr><th>Symbol</th><th>Last</th><th>24h %</th><th>24h Volume (base)</th></tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
+        </div>
+        <div style="text-align: right">
+          <div class="small">Refresh interval: <span id="intervalLabel">15s</span></div>
+          <div class="small">Last update: <span id="lastUpdate">—</span></div>
+        </div>
+      </div>
+    </div><div class="card">
+  <div class="row">
+    <label for="symbol">Symbol (USDT Perpetual):</label>
+    <input id="symbol" value="BTCUSDT" />
+    <button id="trackBtn">Track</button>
+    <label class="small" style="margin-left: 8px">Auto-refresh:</label>
+    <select id="interval">
+      <option value="5000">5s</option>
+      <option value="15000" selected>15s</option>
+      <option value="30000">30s</option>
+      <option value="60000">60s</option>
+    </select>
   </div>
+  <div id="symbolCard" style="margin-top: 12px"></div>
+</div>
 
-  <div style="width:300px">
-    <div class="muted">Quick info</div>
-    <div id="quickList" style="margin-top:8px"></div>
+<div class="card">
+  <div class="row" style="justify-content: space-between; align-items: flex-start">
+    <div style="flex: 1; margin-right: 12px">
+      <div style="display: flex; justify-content: space-between; align-items: center">
+        <div>
+          <div class="muted">Market Volume Leaders</div>
+          <h2 id="volumeLeader">—</h2>
+          <div class="small">
+            Comparing 24h base asset volume of <strong>ETHUSDT</strong> vs
+            <strong>BTCUSDT</strong>
+          </div>
+        </div>
+        <div class="status">
+          <div id="sentimentDot" class="dot" style="background: #cbd5e1"></div>
+          <div id="sentimentLabel" style="font-weight: 700">—</div>
+        </div>
+      </div>
+
+      <div style="margin-top: 12px">
+        <div class="muted">Top Altcoin 24h Movers (Exclude BTC/ETH)</div>
+        <table id="altsTable">
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Last</th>
+              <th>24h %</th>
+              <th>Volume (Base)</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div style="width: 300px">
+      <div class="muted">Quick Overview</div>
+      <div id="quickList" style="margin-top: 8px"></div>
+    </div>
   </div>
 </div>
 
-  </div>  <script>
-    // Binance Futures public base
-    const BASE = 'https://fapi.binance.com';
+<script>
+  const BASE = 'https://fapi.binance.com';
+  let intervalMs = 15000;
+  let timer = null;
 
-    let intervalMs = 15000;
-    let timer = null;
+  const $ = (id) => document.getElementById(id);
+  const symbolInput = $('symbol');
+  const trackBtn = $('trackBtn');
+  const intervalSelect = $('interval');
 
-    const $ = id => document.getElementById(id);
-    const symbolInput = $('symbol');
-    const trackBtn = $('trackBtn');
-    const intervalSelect = $('interval');
+  const fmtNum = (n) => (+n).toLocaleString(undefined, { maximumFractionDigits: 8 });
+  const fmtShort = (n) => (+n).toLocaleString();
 
-    function fmtNum(n){return (+n).toLocaleString(undefined,{maximumFractionDigits:8});}
-    function fmtShort(n){return (+n).toLocaleString();}
+  async function fetchTicker(symbol) {
+    const resp = await fetch(`${BASE}/fapi/v1/ticker/24hr?symbol=${symbol}`);
+    if (!resp.ok) throw new Error('Ticker fetch failed');
+    return resp.json();
+  }
 
-    async function fetchTicker(symbol){
-      const resp = await fetch(`${BASE}/fapi/v1/ticker/24hr?symbol=${symbol}`);
-      if(!resp.ok) throw new Error('Ticker fetch failed');
-      return resp.json();
-    }
+  async function fetchAllTickers() {
+    const resp = await fetch(`${BASE}/fapi/v1/ticker/24hr`);
+    if (!resp.ok) throw new Error('All tickers fetch failed');
+    return resp.json();
+  }
 
-    async function fetchAllTickers(){
-      const resp = await fetch(`${BASE}/fapi/v1/ticker/24hr`);
-      if(!resp.ok) throw new Error('All tickers fetch failed');
-      return resp.json();
-    }
+  const isUSDTPerp = (sym) => sym.endsWith('USDT');
 
-    function isUSDTPerp(sym){
-      // on futures, USDT-margined perpetuals usually end with USDT
-      // exclude leveraged tokens like BTCUP, BTCDOWN, etc. Heuristic: endsWith 'USDT'
-      return sym.endsWith('USDT');
-    }
+  async function update() {
+    const symbol = (symbolInput.value || 'BTCUSDT').toUpperCase().trim();
+    try {
+      const [tick, all] = await Promise.all([fetchTicker(symbol), fetchAllTickers()]);
+      $('lastUpdate').textContent = new Date().toLocaleString();
 
-    function baseFromSymbol(sym){
-      return sym.replace(/USDT$/,'');
-    }
+      const change = parseFloat(tick.priceChangePercent);
+      const changeClass = change >= 0 ? 'green' : 'red';
 
-    async function update(){
-      const symbol = (symbolInput.value || 'BTCUSDT').toUpperCase().trim();
-      try{
-        const [tick, all] = await Promise.all([fetchTicker(symbol), fetchAllTickers()]);
-        const now = new Date();
-        $('lastUpdate').textContent = now.toLocaleString();
-
-        // selected symbol card
-        const change = parseFloat(tick.priceChangePercent);
-        const last = tick.lastPrice;
-        const open = tick.openPrice;
-        const mark = tick.weightedAvgPrice || last;
-        const changeClass = change >= 0 ? 'green' : 'red';
-        $('symbolCard').innerHTML = `
-          <div class="row" style="justify-content:space-between">
-            <div>
-              <div class="muted">${tick.symbol}</div>
-              <div style="font-size:20px;font-weight:800">${fmtNum(last)} <span class="pct ${changeClass}">${change.toFixed(2)}%</span></div>
-              <div class="small">Open: ${fmtNum(open)} · Avg: ${fmtNum(mark)}</div>
+      $('symbolCard').innerHTML = `
+        <div class="row" style="justify-content: space-between">
+          <div>
+            <div class="muted">${tick.symbol}</div>
+            <div style="font-size: 20px; font-weight: 800">
+              ${fmtNum(tick.lastPrice)}
+              <span class="pct ${changeClass}">${change.toFixed(2)}%</span>
             </div>
-            <div class="small" style="text-align:right">
-              <div>24h High: ${fmtNum(tick.highPrice)}</div>
-              <div>24h Low: ${fmtNum(tick.lowPrice)}</div>
-            </div>
-          </div>`;
+            <div class="small">Open: ${fmtNum(tick.openPrice)} · Avg: ${fmtNum(tick.weightedAvgPrice)}</div>
+          </div>
+          <div class="small" style="text-align: right">
+            <div>24h High: ${fmtNum(tick.highPrice)}</div>
+            <div>24h Low: ${fmtNum(tick.lowPrice)}</div>
+          </div>
+        </div>`;
 
-        // find ETHUSDT and BTCUSDT volumes
-        const bySymbol = new Map();
-        all.forEach(t=>bySymbol.set(t.symbol,t));
-        const eth = bySymbol.get('ETHUSDT');
-        const btc = bySymbol.get('BTCUSDT');
-        const ethVol = eth ? parseFloat(eth.volume) : 0; // base asset volume
-        const btcVol = btc ? parseFloat(btc.volume) : 0;
+      const map = new Map(all.map((t) => [t.symbol, t]));
+      const ethVol = parseFloat(map.get('ETHUSDT')?.volume || 0);
+      const btcVol = parseFloat(map.get('BTCUSDT')?.volume || 0);
 
-        const leader = ethVol > btcVol ? 'ETH' : (btcVol > ethVol ? 'BTC' : 'Tie');
-        $('volumeLeader').textContent = `${leader} leads (ETH: ${fmtShort(ethVol)} · BTC: ${fmtShort(btcVol)})`;
+      const leader = ethVol > btcVol ? 'ETH' : btcVol > ethVol ? 'BTC' : 'Equal';
+      $('volumeLeader').textContent = `${leader} leads (ETH: ${fmtShort(ethVol)} · BTC: ${fmtShort(btcVol)})`;
 
-        // sentiment
-        const sentiment = ethVol > btcVol ? 'Bullish for alts (ETH leading volume)' : (btcVol > ethVol ? 'Bearish for alts (BTC leading volume)' : 'Neutral');
-        $('sentimentLabel').textContent = sentiment;
-        const dot = $('sentimentDot');
-        if(ethVol > btcVol){ dot.style.background = '#10b981'; } else if(btcVol > ethVol){ dot.style.background = '#ef4444'; } else { dot.style.background = '#94a3b8'; }
-
-        // build alt coins list: USDT pairs excluding BTCUSDT and ETHUSDT and symbols with UP/DOWN or BULL/BEAR
-        const alts = all.filter(t=>isUSDTPerp(t.symbol) && t.symbol !== 'BTCUSDT' && t.symbol !== 'ETHUSDT' && !/[A-Z]*(UP|DOWN|BULL|BEAR|1INCH|RUNE|BETA)$/.test(t.symbol));
-
-        // enrich and sort by percent change desc
-        const enriched = alts.map(t=>({
-          symbol:t.symbol,
-          last:parseFloat(t.lastPrice),
-          pct:parseFloat(t.priceChangePercent),
-          vol:parseFloat(t.volume)
-        }));
-        // show top 30 movers by absolute pct
-        enriched.sort((a,b)=>Math.abs(b.pct)-Math.abs(a.pct));
-        const top = enriched.slice(0,40);
-
-        const tbody = document.querySelector('#altsTable tbody');
-        tbody.innerHTML = '';
-        for(const a of top){
-          const tr = document.createElement('tr');
-          const pctClass = a.pct >= 0 ? 'green' : 'red';
-          tr.innerHTML = `<td><strong>${a.symbol}</strong></td><td>${fmtNum(a.last)}</td><td class="pct ${pctClass}">${a.pct.toFixed(2)}%</td><td class="small">${fmtShort(a.vol)}</td>`;
-          tbody.appendChild(tr);
-        }
-
-        // quick list: top gainers and losers among alts
-        const gainers = enriched.slice().sort((a,b)=>b.pct-a.pct).slice(0,5);
-        const losers = enriched.slice().sort((a,b)=>a.pct-b.pct).slice(0,5);
-        const q = $('quickList');
-        q.innerHTML = `<div style="margin-bottom:8px"><div class="muted">Top Gainers</div>${gainers.map(g=>`<div class="small">${g.symbol} <span class="pct green">${g.pct.toFixed(2)}%</span></div>`).join('')}</div>
-                       <div><div class="muted">Top Losers</div>${losers.map(g=>`<div class="small">${g.symbol} <span class="pct red">${g.pct.toFixed(2)}%</span></div>`).join('')}</div>`;
-
-      }catch(err){
-        console.error(err);
-        $('lastUpdate').textContent = 'Error';
+      const sentimentDot = $('sentimentDot');
+      const sentimentLabel = $('sentimentLabel');
+      if (ethVol > btcVol) {
+        sentimentLabel.textContent = 'Bullish for Alts (ETH Volume Leading)';
+        sentimentDot.style.background = '#16a34a';
+      } else if (btcVol > ethVol) {
+        sentimentLabel.textContent = 'Bearish for Alts (BTC Volume Leading)';
+        sentimentDot.style.background = '#dc2626';
+      } else {
+        sentimentLabel.textContent = 'Neutral';
+        sentimentDot.style.background = '#9ca3af';
       }
+
+      const alts = all.filter(
+        (t) =>
+          isUSDTPerp(t.symbol) &&
+          !['BTCUSDT', 'ETHUSDT'].includes(t.symbol) &&
+          !/(UP|DOWN|BULL|BEAR)/.test(t.symbol)
+      );
+
+      const ranked = alts
+        .map((t) => ({
+          symbol: t.symbol,
+          last: parseFloat(t.lastPrice),
+          pct: parseFloat(t.priceChangePercent),
+          vol: parseFloat(t.volume),
+        }))
+        .sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct))
+        .slice(0, 40);
+
+      const tbody = document.querySelector('#altsTable tbody');
+      tbody.innerHTML = ranked
+        .map(
+          (a) => `
+          <tr>
+            <td><strong>${a.symbol}</strong></td>
+            <td>${fmtNum(a.last)}</td>
+            <td class="pct ${a.pct >= 0 ? 'green' : 'red'}">${a.pct.toFixed(2)}%</td>
+            <td class="small">${fmtShort(a.vol)}</td>
+          </tr>`
+        )
+        .join('');
+
+      const gainers = ranked.slice().sort((a, b) => b.pct - a.pct).slice(0, 5);
+      const losers = ranked.slice().sort((a, b) => a.pct - b.pct).slice(0, 5);
+
+      $('quickList').innerHTML = `
+        <div style="margin-bottom: 10px">
+          <div class="muted">Top Gainers</div>
+          ${gainers
+            .map((g) => `<div class="small">${g.symbol} <span class="pct green">${g.pct.toFixed(2)}%</span></div>`)
+            .join('')}
+        </div>
+        <div>
+          <div class="muted">Top Losers</div>
+          ${losers
+            .map((l) => `<div class="small">${l.symbol} <span class="pct red">${l.pct.toFixed(2)}%</span></div>`)
+            .join('')}
+        </div>`;
+    } catch (err) {
+      console.error(err);
+      $('lastUpdate').textContent = 'Error';
     }
+  }
 
-    function startTimer(){
-      if(timer) clearInterval(timer);
-      timer = setInterval(update, intervalMs);
-    }
+  function startTimer() {
+    if (timer) clearInterval(timer);
+    timer = setInterval(update, intervalMs);
+  }
 
-    trackBtn.addEventListener('click', ()=>{ update(); });
-    intervalSelect.addEventListener('change', ()=>{
-      intervalMs = parseInt(intervalSelect.value,10);
-      $('intervalLabel').textContent = (intervalMs/1000) + 's';
-      startTimer();
-    });
-
-    // initial run
-    update();
+  trackBtn.addEventListener('click', update);
+  intervalSelect.addEventListener('change', () => {
+    intervalMs = parseInt(intervalSelect.value, 10);
+    $('intervalLabel').textContent = intervalMs / 1000 + 's';
     startTimer();
+  });
 
-  </script></body>
+  update();
+  startTimer();
+</script>
+
+  </body>
 </html>
