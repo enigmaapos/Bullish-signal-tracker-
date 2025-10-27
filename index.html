@@ -1,298 +1,258 @@
 <!doctype html>
+
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Flowing Water Scanner — Binance Futures (USDT Perp)</title>
+  <title>Altseason Momentum Candle Chart — Market 24h % (EMA14/70/200)</title>
   <style>
-    :root{
-      --bg:#0b1020; --panel:#0f1724; --muted:#9aa4c0; --accent:#6ee7b7;
-      --danger:#ff7b7b; --glass: rgba(255,255,255,0.03);
-    }
-    html,body{height:100%;margin:0;font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,"Helvetica Neue",Arial;}
-    body{background:linear-gradient(180deg,#071025 0%,#001025 100%);color:#e6eef8;padding:18px;}
-    .container{max-width:1100px;margin:0 auto;}
-    header{display:flex;gap:16px;align-items:center;margin-bottom:14px;}
-    h1{font-size:20px;margin:0;color:var(--accent)}
-    p.lead{margin:0;color:var(--muted);font-size:13px;}
-    .controls{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0;padding:12px;background:var(--panel);border-radius:10px;}
-    label{font-size:13px;color:var(--muted);display:flex;gap:8px;align-items:center;}
-    input[type="number"], select{background:var(--glass);border:1px solid rgba(255,255,255,0.04);padding:6px 8px;border-radius:6px;color:inherit}
-    button{background:linear-gradient(90deg,#2dd4bf,#06b6d4);border:none;padding:8px 12px;border-radius:8px;color:#022;font-weight:700;cursor:pointer}
-    button.secondary{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted)}
-    table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}
-    thead th{background:rgba(255,255,255,0.02);text-align:left;padding:10px;border-bottom:1px solid rgba(255,255,255,0.03);color:var(--muted)}
-    tbody td{padding:10px;border-bottom:1px dashed rgba(255,255,255,0.02)}
-    .chip{display:inline-block;padding:4px 8px;border-radius:999px;background:rgba(255,255,255,0.03);font-weight:600}
-    .green{color:#9ae6b4}
-    .red{color:#ffb4b4}
+    :root{--bg:#0b0f17;--panel:#071427;--muted:#9fb0c8;--up:#2ecc71;--down:#ff6b6b}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Arial;background:var(--bg);color:#e6eef8}
+    header{display:flex;align-items:center;gap:12px;padding:12px;border-bottom:1px solid rgba(255,255,255,0.03);background:linear-gradient(90deg,#04101a,#071427)}
+    .brand{font-weight:700}
+    .controls{display:flex;gap:8px;margin-left:auto;align-items:center}
+    select,input,button{background:#061527;color:#e6eef8;border:1px solid #19303f;padding:8px;border-radius:8px}
+    #app{display:flex;gap:12px;padding:12px;height:calc(100% - 64px)}
+    #chartWrap{flex:1;background:var(--panel);border-radius:8px;padding:12px;display:flex;flex-direction:column}
+    #chart{flex:1;border-radius:6px}
+    #side{width:340px;background:linear-gradient(180deg,#071427,#061424);border-radius:8px;padding:12px}
+    .row{display:flex;justify-content:space-between;margin-bottom:8px}
+    .muted{color:var(--muted);font-size:13px}
     .small{font-size:12px;color:var(--muted)}
-    footer{margin-top:18px;color:var(--muted);font-size:12px}
-    .spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,0.08);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}
-    @keyframes spin{to{transform:rotate(360deg)}}
+    .green{color:var(--up)}.red{color:var(--down)}
+    footer{padding:8px 12px;font-size:13px;color:var(--muted)}
+    .loader{font-size:13px;color:var(--muted)}
   </style>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <div>
-        <h1>Flowing Water Scanner (Binance Futures USDT Perp)</h1>
-        <p class="lead">Scans USDT perpetual pairs for the "flowing water" short setup (24h pump, yesterday red/today green, 4h RSI overbought).</p>
-      </div>
-      <div style="margin-left:auto;text-align:right">
-        <div class="small">Made for Var — flow-based short filter</div>
-      </div>
-    </header>
-
+  <header>
+    <div class="brand">Altseason Momentum — 24h Market % Candles</div>
+    <div class="small muted">Each candle = aggregated daily % change across selected perpetual USDT alt futures (open/high/low/close are % values)</div>
     <div class="controls">
-      <label>
-        24h change min %
-        <input id="min24" type="number" value="10" step="0.1" style="width:80px"/>
-      </label>
-      <label>
-        24h change max %
-        <input id="max24" type="number" value="25" step="0.1" style="width:80px"/>
-      </label>
-      <label>
-        4h RSI cutoff
-        <input id="rsiCut" type="number" value="70" step="1" style="width:80px"/>
-      </label>
-      <label>
-        Max BTC 24h pump %
-        <input id="btcMax" type="number" value="2" step="0.1" style="width:80px"/>
-      </label>
-      <label>
-        Max symbols to check (to avoid rate limit)
-        <input id="maxSymbols" type="number" value="30" step="1" style="width:80px"/>
-      </label>
-
-      <button id="scanBtn">Scan Now</button>
-      <button id="clearBtn" class="secondary">Clear Results</button>
-      <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
-        <div id="status" class="small">Idle</div>
-        <div id="spinner" style="display:none;margin-left:8px"><span class="spinner"></span></div>
+      <label class="small muted">Days</label>
+      <select id="days"><option value="30">30</option><option value="90">90</option><option value="180">180</option></select>
+      <label class="small muted">Top Alts</label>
+      <select id="topn"><option value="20">Top 20</option><option value="50" selected>Top 50</option><option value="100">Top 100</option></select>
+      <label class="small muted">Exclude Majors</label>
+      <select id="excludeMajors"><option value="true" selected>Exclude BTC & ETH</option><option value="false">Include BTC/ETH</option></select>
+      <button id="loadBtn">Load</button>
+    </div>
+  </header>  <div id="app">
+    <div id="chartWrap">
+      <div id="chart"></div>
+      <div style="margin-top:8px;display:flex;gap:12px;align-items:center">
+        <div class="loader" id="status">Ready</div>
+        <div class="small muted">Tip: Run via local HTTP server (python -m http.server) to avoid CORS issues.</div>
       </div>
     </div>
+    <div id="side">
+      <div class="row"><div class="muted">Range</div><div id="rangeVal">—</div></div>
+      <div class="row"><div class="muted">Last Candle (Close %)</div><div id="lastClose">—</div></div>
+      <div class="row"><div class="muted">EMA14</div><div id="ema14">—</div></div>
+      <div class="row"><div class="muted">EMA70</div><div id="ema70">—</div></div>
+      <div class="row"><div class="muted">EMA200</div><div id="ema200">—</div></div>
+      <hr style="border:none;border-top:1px solid rgba(255,255,255,0.03);margin:12px 0"/>
+      <div class="muted small">BTC / ETH Lines (daily %)</div>
+      <div class="row"><div class="muted">BTC Latest</div><div id="btcVal">—</div></div>
+      <div class="row"><div class="muted">ETH Latest</div><div id="ethVal">—</div></div>
+      <hr style="border:none;border-top:1px solid rgba(255,255,255,0.03);margin:12px 0"/>
+      <div class="small muted">Notes</div>
+      <ul class="small muted">
+        <li>Data: Binance Futures (USDT perpetual) via public REST.</li>
+        <li>Candles computed from daily klines per symbol: percent = (close-open)/open * 100</li>
+        <li>Open of aggregated candle = previous day's aggregated close.</li>
+      </ul>
+    </div>
+  </div>  <footer>Built for Var — Dark TradingView-style lightweight chart with EMA overlays.</footer>  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>  <script>
+    const API = 'https://fapi.binance.com';
+    const daysSelect = document.getElementById('days');
+    const topnSelect = document.getElementById('topn');
+    const excludeMajorsSelect = document.getElementById('excludeMajors');
+    const loadBtn = document.getElementById('loadBtn');
+    const status = document.getElementById('status');
+    const rangeVal = document.getElementById('rangeVal');
+    const lastCloseEl = document.getElementById('lastClose');
+    const ema14El = document.getElementById('ema14');
+    const ema70El = document.getElementById('ema70');
+    const ema200El = document.getElementById('ema200');
+    const btcVal = document.getElementById('btcVal');
+    const ethVal = document.getElementById('ethVal');
 
-    <div id="summary" class="small" style="margin-bottom:8px">Notes: This tool runs in your browser and uses Binance Futures public endpoints. Use responsibly.</div>
+    let chart, candleSeries, ema14Series, ema70Series, ema200Series, btcSeries, ethSeries;
 
-    <table id="results">
-      <thead>
-        <tr>
-          <th>Symbol</th>
-          <th>24h %</th>
-          <th>4h RSI</th>
-          <th>Daily trend (prev-prev → prev → latest)</th>
-          <th>Last 4h candles checked</th>
-          <th>Link</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
+    function fmt(n){ return typeof n==='number' ? n.toFixed(2)+'%' : '—'; }
 
-    <footer>
-      <div>How it works: fetch 24h tickers → take USDT perp symbols with 24h change in range → for top N symbols pull daily & 4h klines → compute RSI(14) and check that yesterday was red, today is green and 4h RSI &gt; cutoff. Avoids scanning if BTC pumped above the BTC pump threshold.</div>
-      <div style="margin-top:8px">Caveats: Binance rate limits and CORS may block many requests; this script throttles checks to 200ms between fetches. Adjust max symbols if you hit errors.</div>
-    </footer>
-  </div>
-
-<script>
-(async function(){
-  const API_ROOT = 'https://fapi.binance.com';
-  const scanBtn = document.getElementById('scanBtn');
-  const clearBtn = document.getElementById('clearBtn');
-  const statusEl = document.getElementById('status');
-  const spinner = document.getElementById('spinner');
-  const tbody = document.querySelector('#results tbody');
-
-  function setStatus(txt, busy=false){
-    statusEl.textContent = txt;
-    spinner.style.display = busy ? 'inline-block' : 'none';
-  }
-
-  function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
-
-  // RSI calculation (classic Wilder 14)
-  function computeRSI(closes, period=14){
-    if(closes.length < period+1) return null;
-    let gains=0, losses=0;
-    // first pass to compute initial avg gain/loss
-    for(let i=1;i<=period;i++){
-      const diff = closes[i] - closes[i-1];
-      if(diff>0) gains += diff; else losses += Math.abs(diff);
-    }
-    let avgGain = gains/period;
-    let avgLoss = losses/period;
-    // smooth
-    for(let i=period+1;i<closes.length;i++){
-      const diff = closes[i] - closes[i-1];
-      avgGain = (avgGain*(period-1) + (diff>0?diff:0)) / period;
-      avgLoss = (avgLoss*(period-1) + (diff<0?Math.abs(diff):0)) / period;
-    }
-    if(avgLoss === 0) return 100;
-    const rs = avgGain / avgLoss;
-    const rsi = 100 - (100 / (1 + rs));
-    return rsi;
-  }
-
-  // Fetch helper with basic error handling
-  async function apiGET(path, query){
-    const url = new URL(API_ROOT + path);
-    if(query) Object.entries(query).forEach(([k,v])=>url.searchParams.append(k,v));
-    const res = await fetch(url.toString());
-    if(!res.ok){
-      const text = await res.text().catch(()=>null);
-      throw new Error('HTTP ' + res.status + ' ' + text);
-    }
-    return res.json();
-  }
-
-  async function scan(){
-    tbody.innerHTML = '';
-    setStatus('Fetching tickers...', true);
-
-    const min24 = parseFloat(document.getElementById('min24').value);
-    const max24 = parseFloat(document.getElementById('max24').value);
-    const rsiCut = parseFloat(document.getElementById('rsiCut').value);
-    const btcMax = parseFloat(document.getElementById('btcMax').value);
-    const maxSymbols = parseInt(document.getElementById('maxSymbols').value) || 30;
-
-    // 1) get all futures 24hr tickers
-    let tickers;
-    try {
-      tickers = await apiGET('/fapi/v1/ticker/24hr');
-    } catch(err) {
-      setStatus('Failed fetching tickers: ' + err.message);
-      return;
-    }
-
-    // check BTCUSDT pump
-    const btc = tickers.find(t=>t.symbol==='BTCUSDT');
-    if(btc){
-      const btcChange = parseFloat(btc.priceChangePercent);
-      if(btcChange > btcMax){
-        setStatus('Aborting: BTC has pumped ' + btcChange.toFixed(2) + '% (> ' + btcMax + '%).');
-        return;
+    function computeEMA(values, period){
+      const k = 2/(period+1);
+      const out = [];
+      let prev;
+      for(let i=0;i<values.length;i++){
+        const v = values[i];
+        if(prev===undefined){ prev = v; out.push(v); }
+        else{ prev = v*k + prev*(1-k); out.push(prev); }
       }
+      return out;
     }
 
-    // filter USDT perpetuals (symbol endsWith USDT) and avoid tokenized leverage tokens or BRL etc
-    let usdt = tickers.filter(t=>t.symbol.endsWith('USDT') && !t.symbol.includes('UP') && !t.symbol.includes('DOWN') && !t.symbol.includes('BEAR') && !t.symbol.includes('BULL'));
-    // filter by 24h change range
-    let candidates = usdt.filter(t=>{
-      const ch = parseFloat(t.priceChangePercent);
-      return ch >= min24 && ch <= max24;
-    });
-
-    if(candidates.length === 0){
-      setStatus('No candidates found in the 24h% range.');
-      return;
-    }
-
-    // sort by highest 24h change first, then limit to maxSymbols
-    candidates.sort((a,b)=>parseFloat(b.priceChangePercent)-parseFloat(a.priceChangePercent));
-    candidates = candidates.slice(0, maxSymbols);
-
-    setStatus('Checking ' + candidates.length + ' candidate symbols...', true);
-
-    // throttle fetches to avoid rate limit; for each candidate fetch daily klines and 4h klines
-    const matches = [];
-    for(let i=0;i<candidates.length;i++){
-      const t = candidates[i];
-      const sym = t.symbol;
-      statusEl.textContent = `Checking ${i+1}/${candidates.length}: ${sym}`;
-      try {
-        // fetch daily klines (we need at least 3 days to assert prev-prev)
-        const daily = await apiGET('/fapi/v1/klines', {symbol: sym, interval: '1d', limit: 5});
-        // fetch 4h klines for RSI
-        const kl4h = await apiGET('/fapi/v1/klines', {symbol: sym, interval: '4h', limit: 100});
-        // parse closes
-        const dailyCloses = daily.map(d => parseFloat(d[4])); // close is index 4
-        // need at least 3 daily closes
-        if(dailyCloses.length < 3){
-          // skip
-          await sleep(200);
-          continue;
-        }
-        // Check yesterday red and today green:
-        // dailyCloses: [oldest...latest]; last = latest close (could be partial day)
-        // We'll interpret: prevPrev = at index len-3, prev = len-2, latest = len-1
-        const len = dailyCloses.length;
-        const prevPrevClose = dailyCloses[len-3];
-        const prevClose = dailyCloses[len-2];
-        const latestClose = dailyCloses[len-1];
-
-        const yesterdayRed = prevClose < prevPrevClose;
-        const todayGreen = latestClose > prevClose;
-
-        // compute RSI(14) from closes of kl4h (close at idx 4)
-        const closes4h = kl4h.map(k => parseFloat(k[4]));
-        const rsi = computeRSI(closes4h, 14);
-
-        // minimal check: RSI exists and > cutoff, and daily pattern matches
-        if(rsi !== null && rsi > rsiCut && yesterdayRed && todayGreen){
-          matches.push({
-            symbol: sym,
-            change24: parseFloat(t.priceChangePercent),
-            rsi: rsi,
-            prevPrevClose,
-            prevClose,
-            latestClose,
-            recent4hCloses: closes4h.slice(-6) // last 6 closes for display
-          });
-        }
-      } catch(err){
-        // record error in console but continue
-        console.warn('Error checking', sym, err);
-      }
-      // throttle small pause
-      await sleep(220);
-    }
-
-    // populate table
-    tbody.innerHTML = '';
-    if(matches.length === 0){
-      setStatus('No matched symbols found after checks.');
-    } else {
-      setStatus('Found ' + matches.length + ' matching symbol(s).', false);
-      matches.forEach(m=>{
-        const tr = document.createElement('tr');
-        const a = `<a href="https://www.binance.com/en/futures/${m.symbol}" target="_blank" rel="noreferrer">${m.symbol}</a>`;
-        tr.innerHTML = `
-          <td>${a}</td>
-          <td class="${m.change24>=0?'green':''}">${m.change24.toFixed(2)}%</td>
-          <td>${m.rsi.toFixed(1)}</td>
-          <td>
-            <div class="small">prev-prev: ${m.prevPrevClose}</div>
-            <div class="small">prev: ${m.prevClose}</div>
-            <div class="small">latest: ${m.latestClose}</div>
-          </td>
-          <td class="small">${m.recent4hCloses.map(c=>c.toFixed(4)).join(', ')}</td>
-          <td><a class="chip" href="https://www.binance.com/en/futures/${m.symbol}" target="_blank" rel="noreferrer">Open</a></td>
-        `;
-        tbody.appendChild(tr);
+    function initChart(){
+      document.getElementById('chart').innerHTML = '';
+      chart = LightweightCharts.createChart(document.getElementById('chart'), {
+        width: document.getElementById('chart').clientWidth,
+        height: document.getElementById('chart').clientHeight,
+        layout: { backgroundColor: '#071427', textColor: '#dbeefc' },
+        grid: { vertLines: { color: '#0d2330' }, horzLines: { color: '#0d2330' } },
+        rightPriceScale: { borderColor: '#172737' },
+        timeScale: { borderColor: '#172737', timeVisible: true }
       });
+      candleSeries = chart.addCandlestickSeries({ upColor:'#2ecc71', downColor:'#ff6b6b', borderVisible:true, wickUpColor:'#2ecc71', wickDownColor:'#ff6b6b' });
+      ema14Series = chart.addLineSeries({ color:'#ffd14d', lineWidth:2 });
+      ema70Series = chart.addLineSeries({ color:'#7bd3ff', lineWidth:2 });
+      ema200Series = chart.addLineSeries({ color:'#c38cff', lineWidth:2 });
+      btcSeries = chart.addLineSeries({ color:'#ff9f43', lineWidth:2 });
+      ethSeries = chart.addLineSeries({ color:'#9ae6b4', lineWidth:2 });
+      window.addEventListener('resize', ()=> chart.applyOptions({ width: document.getElementById('chart').clientWidth, height: document.getElementById('chart').clientHeight }));
     }
-  }
 
-  scanBtn.addEventListener('click', async ()=>{
-    setStatus('Starting scan...', true);
-    try {
-      await scan();
-    } catch(e){
-      setStatus('Scan error: ' + e.message);
-      console.error(e);
+    async function fetchSymbols(){
+      try{
+        const res = await fetch(API+'/fapi/v1/exchangeInfo');
+        const j = await res.json();
+        const syms = j.symbols.filter(s=> s.contractType==='PERPETUAL' && s.status==='TRADING' && s.symbol.endsWith('USDT'))
+                          .map(s=>({symbol:s.symbol, base:s.baseAsset, quote:s.quoteAsset}));
+        return syms;
+      }catch(e){ console.warn('exchangeInfo failed',e); return [] }
     }
-  });
 
-  clearBtn.addEventListener('click', ()=>{
-    tbody.innerHTML = '';
-    setStatus('Idle');
-  });
+    // limit concurrency helper
+    async function pMap(list, fn, concurrency=6){
+      const results = [];
+      const executing = [];
+      for(const item of list){
+        const p = Promise.resolve().then(()=>fn(item));
+        results.push(p);
+        executing.push(p);
+        if(executing.length>=concurrency) await Promise.race(executing).catch(()=>{});
+        executing.splice(executing.findIndex(x=>x===p),1);
+      }
+      return Promise.all(results);
+    }
 
-  // optional: auto-scan on load (disabled)
-  // setTimeout(()=>scanBtn.click(), 500);
-})();
-</script>
-</body>
+    async function loadData(){
+      status.textContent = 'Fetching symbol list...';
+      const allSymbols = await fetchSymbols();
+      if(!allSymbols.length) { status.textContent='Failed to load symbols'; return; }
+
+      const includeMajors = excludeMajorsSelect.value === 'false';
+      // filter out BTC and ETH from alts if requested
+      let alts = allSymbols.filter(s=> !(s.symbol==='BTCUSDT' || s.symbol==='ETHUSDT'));
+      if(includeMajors){ alts = allSymbols; }
+
+      // pick top N by symbol list order (not by liquidity here). For a better approach, fetch 24hr volume and sort by volume.
+      status.textContent = 'Fetching 24h volumes to rank top symbols...';
+      const tickersResp = await fetch(API+'/fapi/v1/ticker/24hr');
+      const tickers = await tickersResp.json();
+      const tickerMap = new Map(tickers.map(t=>[t.symbol,t]));
+      // attach volume
+      alts.forEach(s=>{ const t=tickerMap.get(s.symbol); s.volume = t? Number(t.quoteVolume) : 0; });
+      alts.sort((a,b)=> b.volume - a.volume);
+
+      const topN = parseInt(topnSelect.value || '50',10);
+      const selectedAlts = alts.slice(0, topN);
+
+      const days = parseInt(daysSelect.value,10) || 30;
+
+      // for each symbol fetch daily klines
+      status.textContent = `Fetching daily klines for ${selectedAlts.length} symbols (this may take a few seconds)...`;
+      const limit = days + 5;
+      const fetchK = async (s)=>{
+        try{
+          const resp = await fetch(`${API}/fapi/v1/klines?symbol=${s.symbol}&interval=1d&limit=${limit}`);
+          const j = await resp.json();
+          // map to {time, open, high, low, close}
+          const arr = j.map(k=>({time: Math.floor(k[0]/1000), open: Number(k[1]), high:Number(k[2]), low:Number(k[3]), close:Number(k[4])}));
+          return {symbol:s.symbol,base:s.base,arr};
+        }catch(e){ console.warn('kline failed',s.symbol,e); return {symbol:s.symbol,arr:[]}; }
+      };
+
+      const klines = (await pMap(selectedAlts, fetchK, 6)).filter(x=>x.arr && x.arr.length>=days);
+      if(!klines.length){ status.textContent='No kline data'; return; }
+
+      status.textContent = 'Aggregating daily percent changes...';
+      // build per-day aggregated candles over the last `days` days using aligned kline indices (we'll align by timestamps)
+      // find common timestamps intersection
+      const timelines = klines.map(k=>k.arr.map(x=>x.time));
+      // find the last `days` timestamps common to majority by taking the timestamps from first symbol's last days
+      const ref = klines[0].arr.slice(-days).map(x=>x.time);
+
+      const candles = [];
+      for(let i=0;i<ref.length;i++){
+        const t = ref[i];
+        // for each symbol, find the k at same time
+        const percs = [];
+        for(const k of klines){
+          const rec = k.arr.find(r=>r.time===t);
+          if(rec){ const p = (rec.close - rec.open)/rec.open * 100; percs.push(p); }
+        }
+        if(percs.length===0) continue;
+        const avg = percs.reduce((a,b)=>a+b,0)/percs.length;
+        const high = Math.max(...percs);
+        const low = Math.min(...percs);
+        const open = candles.length? candles[candles.length-1].close : avg; // previous day's close
+        const close = avg;
+        candles.push({ time: t, open: Number(open.toFixed(6)), high: Number(high.toFixed(6)), low: Number(low.toFixed(6)), close: Number(close.toFixed(6)) });
+      }
+
+      // prepare BTC and ETH lines using same kline fetch
+      status.textContent = 'Fetching BTC/ETH daily lines...';
+      const majors = ['BTCUSDT','ETHUSDT'];
+      const majorLines = {};
+      for(const m of majors){
+        try{
+          const r = await fetch(`${API}/fapi/v1/klines?symbol=${m}&interval=1d&limit=${limit}`);
+          const j = await r.json();
+          const arr = j.map(k=>({time:Math.floor(k[0]/1000), open:Number(k[1]), close:Number(k[4])}));
+          // compute percent per day aligned with ref
+          const series = arr.filter(x=> ref.includes(x.time)).map(x=>({time: x.time, value: (x.close - x.open)/x.open * 100 }));
+          majorLines[m] = series;
+        }catch(e){ console.warn('majors failed',m,e); }
+      }
+
+      status.textContent = 'Rendering chart...';
+      initChart();
+      // set candle data
+      candleSeries.setData(candles.map(c=>({time: c.time, open:c.open, high:c.high, low:c.low, close:c.close})));
+      // EMAs on close series
+      const closes = candles.map(c=>c.close);
+      const ema14 = computeEMA(closes,14);
+      const ema70 = computeEMA(closes,70);
+      const ema200 = computeEMA(closes,200);
+      const ema14Data = candles.map((c,i)=>({time:c.time, value: ema14[i]}));
+      const ema70Data = candles.map((c,i)=>({time:c.time, value: ema70[i]}));
+      const ema200Data = candles.map((c,i)=>({time:c.time, value: ema200[i]}));
+      ema14Series.setData(ema14Data);
+      ema70Series.setData(ema70Data);
+      ema200Series.setData(ema200Data);
+
+      // btc/eth lines
+      if(majorLines['BTCUSDT']) btcSeries.setData(majorLines['BTCUSDT']);
+      if(majorLines['ETHUSDT']) ethSeries.setData(majorLines['ETHUSDT']);
+
+      // update sidebar
+      rangeVal.textContent = `${candles.length} days`; 
+      const last = candles[candles.length-1];
+      lastCloseEl.textContent = fmt(last.close);
+      ema14El.textContent = fmt(ema14[ema14.length-1]);
+      ema70El.textContent = fmt(ema70[ema70.length-1]);
+      ema200El.textContent = fmt(ema200[ema200.length-1]);
+      if(majorLines['BTCUSDT'] && majorLines['BTCUSDT'].length) btcVal.textContent = fmt(majorLines['BTCUSDT'][majorLines['BTCUSDT'].length-1].value);
+      if(majorLines['ETHUSDT'] && majorLines['ETHUSDT'].length) ethVal.textContent = fmt(majorLines['ETHUSDT'][majorLines['ETHUSDT'].length-1].value);
+
+      status.textContent = 'Done';
+    }
+
+    loadBtn.addEventListener('click', ()=>{ status.textContent='Starting...'; loadData().catch(e=>{ console.error(e); status.textContent='Error'; }); });
+
+    // initial load
+    (async ()=>{ initChart(); status.textContent='Ready — click Load'; })();
+  </script></body>
 </html>
