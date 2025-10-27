@@ -1,194 +1,347 @@
-<!DOCTYPE html><html lang="en">
+<!DOCTYPE html>
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Binance Futures 24h Tracker & Altcoin Sentiment Dashboard</title>
+    <title>Binance Futures Tracker & Altcoin Sentiment</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet" />
     <style>
       :root {
-        font-family: 'Inter', 'Segoe UI', Roboto, Arial, sans-serif;
-        color: #0f172a;
-      }body {
-    margin: 0;
-    padding: 24px;
-    background: #f9fafb;
-  }
+        --color-primary: #1e3a8a; /* Dark Blue */
+        --color-secondary: #3b82f6; /* Medium Blue */
+        --color-bg: #f8fafc; /* Light Gray/Off-White */
+        --color-card-bg: #ffffff;
+        --color-text-dark: #1f2937;
+        --color-text-muted: #6b7280;
+        --color-success: #10b981; /* Teal Green */
+        --color-danger: #ef4444; /* Red */
+        --color-neutral: #9ca3af;
+        --shadow-elevation: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 30px;
+        background: var(--color-bg);
+        font-family: 'Poppins', sans-serif;
+        color: var(--color-text-dark);
+        line-height: 1.6;
+      }
 
-  .card {
-    background: #ffffff;
-    border-radius: 12px;
-    padding: 20px;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.05);
-    margin-bottom: 16px;
-  }
+      /* Layout */
+      .dashboard-container {
+        display: grid;
+        gap: 20px;
+        max-width: 1400px;
+        margin: 0 auto;
+        grid-template-columns: 1fr;
+      }
+      
+      @media (min-width: 1024px) {
+        .dashboard-container {
+          grid-template-columns: 2fr 1fr;
+        }
+        .main-content {
+          grid-column: 1 / 2;
+        }
+        .sidebar {
+          grid-column: 2 / 3;
+        }
+      }
 
-  .row {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-  }
+      /* General Card Styling */
+      .card {
+        background: var(--color-card-bg);
+        border-radius: 16px;
+        padding: 24px;
+        box-shadow: var(--shadow-elevation);
+        transition: transform 0.3s ease;
+      }
+      .card:hover {
+        transform: translateY(-2px);
+      }
 
-  input,
-  button,
-  select {
-    padding: 8px 12px;
-    border-radius: 8px;
-    border: 1px solid #d1d5db;
-    font-size: 14px;
-  }
+      /* Typography */
+      h1 {
+        margin: 0 0 4px 0;
+        font-size: 26px;
+        font-weight: 700;
+        color: var(--color-primary);
+      }
+      h2 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 600;
+      }
+      .muted-text {
+        color: var(--color-text-muted);
+        font-size: 14px;
+        margin-top: 4px;
+      }
+      .small-text {
+        font-size: 12px;
+        color: var(--color-text-muted);
+      }
 
-  h1 {
-    margin: 0 0 6px 0;
-    font-size: 20px;
-    font-weight: 700;
-  }
+      /* Forms and Controls */
+      .control-panel {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      input,
+      select,
+      button {
+        padding: 10px 14px;
+        border-radius: 10px;
+        border: 1px solid #e5e7eb;
+        font-size: 14px;
+        transition: all 0.2s;
+      }
+      input:focus, select:focus {
+        border-color: var(--color-secondary);
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+      }
+      button {
+        background: var(--color-primary);
+        color: white;
+        font-weight: 600;
+        cursor: pointer;
+        border: none;
+      }
+      button:hover {
+        background: var(--color-secondary);
+      }
 
-  h2 {
-    margin: 4px 0;
-    font-size: 16px;
-  }
+      /* Single Symbol Tracker */
+      .symbol-display {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-top: 15px;
+        padding: 15px 0;
+        border-top: 1px solid #f3f4f6;
+      }
+      .price-main {
+        font-size: 32px;
+        font-weight: 700;
+        display: flex;
+        align-items: baseline;
+      }
+      .pct {
+        font-weight: 700;
+        font-size: 20px;
+        margin-left: 10px;
+        padding: 4px 8px;
+        border-radius: 6px;
+      }
 
-  .muted {
-    color: #6b7280;
-    font-size: 13px;
-  }
+      /* Colors */
+      .green {
+        color: var(--color-success);
+        background-color: rgba(16, 185, 129, 0.1);
+      }
+      .red {
+        color: var(--color-danger);
+        background-color: rgba(239, 68, 68, 0.1);
+      }
+      .no-bg {
+        background-color: transparent !important;
+        padding: 0 !important;
+        font-size: 14px !important;
+      }
 
-  .pct {
-    font-weight: 700;
-  }
+      /* Sentiment & Volume */
+      .sentiment-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-bottom: 15px;
+        border-bottom: 1px solid #f3f4f6;
+        margin-bottom: 15px;
+      }
+      .status {
+        display: inline-flex;
+        gap: 10px;
+        align-items: center;
+        font-weight: 600;
+      }
+      .dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+      }
+      .dot-green { background: var(--color-success); }
+      .dot-red { background: var(--color-danger); }
+      .dot-neutral { background: var(--color-neutral); }
 
-  .green {
-    color: #16a34a;
-  }
-
-  .red {
-    color: #dc2626;
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 10px;
-  }
-
-  th,
-  td {
-    padding: 8px;
-    text-align: left;
-    border-bottom: 1px solid #e5e7eb;
-    font-size: 13px;
-  }
-
-  th {
-    color: #374151;
-    font-weight: 600;
-  }
-
-  .small {
-    font-size: 12px;
-    color: #6b7280;
-  }
-
-  .status {
-    display: inline-flex;
-    gap: 8px;
-    align-items: center;
-  }
-
-  .dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-  }
-</style>
-
-  </head>  <body>
-    <div class="card">
-      <div class="row" style="justify-content: space-between">
-        <div>
-          <h1>Binance Futures — 24h Price Change & Altcoin Sentiment</h1>
-          <div class="muted">
-            Real-time tracker for USDT-margined perpetual contracts using Binance
-            Futures (fapi).
+      /* Tables */
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 15px;
+      }
+      th,
+      td {
+        padding: 12px 8px;
+        text-align: left;
+        border-bottom: 1px solid #f3f4f6;
+        font-size: 14px;
+      }
+      th {
+        color: var(--color-text-muted);
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: 12px;
+      }
+      td strong {
+        font-weight: 600;
+        color: var(--color-text-dark);
+      }
+      tbody tr:last-child td {
+        border-bottom: none;
+      }
+      
+      /* Sidebar Quick List */
+      .quick-list-section {
+        margin-bottom: 20px;
+        padding: 15px;
+        border-radius: 12px;
+        background: #f8faff; /* Slightly different background for visual break */
+      }
+      .quick-list-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 6px 0;
+        font-size: 14px;
+        border-bottom: 1px dotted #e0e7ff;
+      }
+      .quick-list-item:last-child {
+        border-bottom: none;
+      }
+      .sidebar h2 {
+        margin-bottom: 10px;
+        color: var(--color-primary);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="dashboard-container">
+      <div class="card" style="grid-column: 1 / -1;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 15px;">
+          <div>
+            <h1>Binance Futures Live Tracker</h1>
+            <div class="muted-text">
+              Real-time 24h performance and Altcoin Sentiment for USDT Perpetual contracts (fapi).
+            </div>
+          </div>
+          <div style="text-align: right">
+            <div class="small-text">Refresh interval: <span id="intervalLabel">15s</span></div>
+            <div class="small-text">Last update: <strong id="lastUpdate">—</strong></div>
           </div>
         </div>
-        <div style="text-align: right">
-          <div class="small">Refresh interval: <span id="intervalLabel">15s</span></div>
-          <div class="small">Last update: <span id="lastUpdate">—</span></div>
-        </div>
       </div>
-    </div><div class="card">
-  <div class="row">
-    <label for="symbol">Symbol (USDT Perpetual):</label>
-    <input id="symbol" value="BTCUSDT" />
-    <button id="trackBtn">Track</button>
-    <label class="small" style="margin-left: 8px">Auto-refresh:</label>
-    <select id="interval">
-      <option value="5000">5s</option>
-      <option value="15000" selected>15s</option>
-      <option value="30000">30s</option>
-      <option value="60000">60s</option>
-    </select>
-  </div>
-  <div id="symbolCard" style="margin-top: 12px"></div>
-</div>
 
-<div class="card">
-  <div class="row" style="justify-content: space-between; align-items: flex-start">
-    <div style="flex: 1; margin-right: 12px">
-      <div style="display: flex; justify-content: space-between; align-items: center">
-        <div>
-          <div class="muted">Market Volume Leaders</div>
-          <h2 id="volumeLeader">—</h2>
-          <div class="small">
-            Comparing 24h base asset volume of <strong>ETHUSDT</strong> vs
-            <strong>BTCUSDT</strong>
+      <div class="main-content">
+        <div class="card">
+          <div class="control-panel">
+            <label for="symbol" style="font-weight: 600;">Track Symbol:</label>
+            <input id="symbol" value="BTCUSDT" style="flex: 1; max-width: 150px;" />
+            <button id="trackBtn">Track</button>
+            <label class="small-text" style="margin-left: 10px">Auto-refresh:</label>
+            <select id="interval">
+              <option value="5000">5s</option>
+              <option value="15000" selected>15s</option>
+              <option value="30000">30s</option>
+              <option value="60000">60s</option>
+            </select>
+          </div>
+          <div id="symbolCard" class="symbol-display">
+            <div class="muted-text" style="color: var(--color-text-dark);">Enter a symbol and click Track to begin.</div>
           </div>
         </div>
-        <div class="status">
-          <div id="sentimentDot" class="dot" style="background: #cbd5e1"></div>
-          <div id="sentimentLabel" style="font-weight: 700">—</div>
+
+        <div class="card">
+          <div class="sentiment-header">
+            <div>
+              <div class="muted-text" style="margin-bottom: 6px;">Market Volume Leaders & Sentiment</div>
+              <h2 id="volumeLeader">—</h2>
+              <div class="small-text">
+                Comparing 24h base asset volume of <strong>ETHUSDT</strong> vs <strong>BTCUSDT</strong>
+              </div>
+            </div>
+            <div class="status">
+              <div id="sentimentDot" class="dot dot-neutral"></div>
+              <div id="sentimentLabel" style="font-weight: 700;">—</div>
+            </div>
+          </div>
+
+          <div>
+            <div class="muted-text">Top 40 Altcoin 24h Movers (Exclude BTC/ETH)</div>
+            <table id="altsTable">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Last Price</th>
+                  <th>24h % Change</th>
+                  <th>Volume (Base)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="4" style="text-align: center; color: var(--color-text-muted);">Loading data...</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
-      <div style="margin-top: 12px">
-        <div class="muted">Top Altcoin 24h Movers (Exclude BTC/ETH)</div>
-        <table id="altsTable">
-          <thead>
-            <tr>
-              <th>Symbol</th>
-              <th>Last</th>
-              <th>24h %</th>
-              <th>Volume (Base)</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+      <div class="sidebar">
+        <div class="card">
+          <h2>Quick Overview</h2>
+          <div id="quickList">
+            <div class="quick-list-section">
+              <div class="muted-text" style="margin-bottom: 10px;">Top 5 Gainers</div>
+              </div>
+            <div class="quick-list-section">
+              <div class="muted-text" style="margin-bottom: 10px;">Top 5 Losers</div>
+              </div>
+          </div>
+        </div>
       </div>
     </div>
-
-    <div style="width: 300px">
-      <div class="muted">Quick Overview</div>
-      <div id="quickList" style="margin-top: 8px"></div>
-    </div>
-  </div>
-</div>
 
 <script>
   const BASE = 'https://fapi.binance.com';
   let intervalMs = 15000;
   let timer = null;
 
+  // DOM utility
   const $ = (id) => document.getElementById(id);
   const symbolInput = $('symbol');
   const trackBtn = $('trackBtn');
   const intervalSelect = $('interval');
 
+  // Helper functions for formatting
   const fmtNum = (n) => (+n).toLocaleString(undefined, { maximumFractionDigits: 8 });
-  const fmtShort = (n) => (+n).toLocaleString();
+  const fmtShort = (n) => {
+    n = parseFloat(n);
+    if (Math.abs(n) >= 1.0e+9) return (Math.abs(n) / 1.0e+9).toFixed(2) + "B";
+    if (Math.abs(n) >= 1.0e+6) return (Math.abs(n) / 1.0e+6).toFixed(2) + "M";
+    return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  };
+  const fmtPct = (n) => parseFloat(n).toFixed(2) + '%';
+  const getPctClass = (n) => n >= 0 ? 'green' : 'red';
 
+  const isUSDTPerp = (sym) => sym.endsWith('USDT');
+
+  // --- API Fetching Functions ---
   async function fetchTicker(symbol) {
     const resp = await fetch(`${BASE}/fapi/v1/ticker/24hr?symbol=${symbol}`);
-    if (!resp.ok) throw new Error('Ticker fetch failed');
+    if (!resp.ok) throw new Error(`Ticker fetch failed for ${symbol}`);
     return resp.json();
   }
 
@@ -198,58 +351,64 @@
     return resp.json();
   }
 
-  const isUSDTPerp = (sym) => sym.endsWith('USDT');
-
+  // --- Main Update Function ---
   async function update() {
     const symbol = (symbolInput.value || 'BTCUSDT').toUpperCase().trim();
     try {
+      // 1. Fetch Data Concurrently
       const [tick, all] = await Promise.all([fetchTicker(symbol), fetchAllTickers()]);
-      $('lastUpdate').textContent = new Date().toLocaleString();
+      $('lastUpdate').textContent = new Date().toLocaleTimeString();
 
+      // 2. Single Symbol Tracker Update
       const change = parseFloat(tick.priceChangePercent);
-      const changeClass = change >= 0 ? 'green' : 'red';
+      const changeClass = getPctClass(change);
 
       $('symbolCard').innerHTML = `
-        <div class="row" style="justify-content: space-between">
-          <div>
-            <div class="muted">${tick.symbol}</div>
-            <div style="font-size: 20px; font-weight: 800">
-              ${fmtNum(tick.lastPrice)}
-              <span class="pct ${changeClass}">${change.toFixed(2)}%</span>
-            </div>
-            <div class="small">Open: ${fmtNum(tick.openPrice)} · Avg: ${fmtNum(tick.weightedAvgPrice)}</div>
+        <div>
+          <div class="muted-text" style="font-size: 16px;">${tick.symbol}</div>
+          <div class="price-main">
+            ${fmtNum(tick.lastPrice)}
+            <span class="pct ${changeClass}">${fmtPct(change)}</span>
           </div>
-          <div class="small" style="text-align: right">
-            <div>24h High: ${fmtNum(tick.highPrice)}</div>
-            <div>24h Low: ${fmtNum(tick.lowPrice)}</div>
+          <div class="small-text">
+            Open: ${fmtNum(tick.openPrice)} &middot; Avg: ${fmtNum(tick.weightedAvgPrice)}
           </div>
+        </div>
+        <div class="small-text" style="text-align: right">
+          <div>24h High: ${fmtNum(tick.highPrice)}</div>
+          <div>24h Low: ${fmtNum(tick.lowPrice)}</div>
         </div>`;
 
+      // 3. Altcoin Sentiment and Volume
       const map = new Map(all.map((t) => [t.symbol, t]));
       const ethVol = parseFloat(map.get('ETHUSDT')?.volume || 0);
       const btcVol = parseFloat(map.get('BTCUSDT')?.volume || 0);
 
-      const leader = ethVol > btcVol ? 'ETH' : btcVol > ethVol ? 'BTC' : 'Equal';
-      $('volumeLeader').textContent = `${leader} leads (ETH: ${fmtShort(ethVol)} · BTC: ${fmtShort(btcVol)})`;
-
       const sentimentDot = $('sentimentDot');
       const sentimentLabel = $('sentimentLabel');
-      if (ethVol > btcVol) {
+      
+      let leaderText = `ETH: ${fmtShort(ethVol)} / BTC: ${fmtShort(btcVol)}`;
+
+      if (ethVol > btcVol * 1.05) { // 5% buffer for clear leadership
         sentimentLabel.textContent = 'Bullish for Alts (ETH Volume Leading)';
-        sentimentDot.style.background = '#16a34a';
-      } else if (btcVol > ethVol) {
+        sentimentDot.className = 'dot dot-green';
+        $('volumeLeader').textContent = `ETH Leads - ${leaderText}`;
+      } else if (btcVol > ethVol * 1.05) {
         sentimentLabel.textContent = 'Bearish for Alts (BTC Volume Leading)';
-        sentimentDot.style.background = '#dc2626';
+        sentimentDot.className = 'dot dot-red';
+        $('volumeLeader').textContent = `BTC Leads - ${leaderText}`;
       } else {
-        sentimentLabel.textContent = 'Neutral';
-        sentimentDot.style.background = '#9ca3af';
+        sentimentLabel.textContent = 'Neutral (Volume Parity)';
+        sentimentDot.className = 'dot dot-neutral';
+        $('volumeLeader').textContent = `Parity - ${leaderText}`;
       }
 
+      // 4. Altcoin Table Processing
       const alts = all.filter(
         (t) =>
           isUSDTPerp(t.symbol) &&
           !['BTCUSDT', 'ETHUSDT'].includes(t.symbol) &&
-          !/(UP|DOWN|BULL|BEAR)/.test(t.symbol)
+          !/(UP|DOWN|BULL|BEAR)/.test(t.symbol) // Filter out leveraged tokens
       );
 
       const ranked = alts
@@ -259,7 +418,7 @@
           pct: parseFloat(t.priceChangePercent),
           vol: parseFloat(t.volume),
         }))
-        .sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct))
+        .sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct)) // Sort by absolute change magnitude
         .slice(0, 40);
 
       const tbody = document.querySelector('#altsTable tbody');
@@ -269,37 +428,46 @@
           <tr>
             <td><strong>${a.symbol}</strong></td>
             <td>${fmtNum(a.last)}</td>
-            <td class="pct ${a.pct >= 0 ? 'green' : 'red'}">${a.pct.toFixed(2)}%</td>
-            <td class="small">${fmtShort(a.vol)}</td>
+            <td class="pct no-bg ${getPctClass(a.pct)}">${fmtPct(a.pct)}</td>
+            <td class="small-text">${fmtShort(a.vol)}</td>
           </tr>`
         )
         .join('');
 
+      // 5. Quick Overview Sidebar
       const gainers = ranked.slice().sort((a, b) => b.pct - a.pct).slice(0, 5);
       const losers = ranked.slice().sort((a, b) => a.pct - b.pct).slice(0, 5);
 
+      const formatQuickList = (arr, colorClass) => arr
+        .map((item) => `
+          <div class="quick-list-item">
+            <span>${item.symbol}</span> 
+            <span class="${colorClass}">${fmtPct(item.pct)}</span>
+          </div>`)
+        .join('');
+
       $('quickList').innerHTML = `
-        <div style="margin-bottom: 10px">
-          <div class="muted">Top Gainers</div>
-          ${gainers
-            .map((g) => `<div class="small">${g.symbol} <span class="pct green">${g.pct.toFixed(2)}%</span></div>`)
-            .join('')}
+        <div class="quick-list-section">
+          <div class="muted-text" style="font-weight: 600;">Top 5 Gainers</div>
+          ${formatQuickList(gainers, 'green no-bg')}
         </div>
-        <div>
-          <div class="muted">Top Losers</div>
-          ${losers
-            .map((l) => `<div class="small">${l.symbol} <span class="pct red">${l.pct.toFixed(2)}%</span></div>`)
-            .join('')}
+        <div class="quick-list-section">
+          <div class="muted-text" style="font-weight: 600;">Top 5 Losers</div>
+          ${formatQuickList(losers, 'red no-bg')}
         </div>`;
+
     } catch (err) {
-      console.error(err);
+      console.error('Update Error:', err);
       $('lastUpdate').textContent = 'Error';
+      $('symbolCard').innerHTML = `<div class="muted-text" style="color: var(--color-danger);">Error fetching data. Check console.</div>`;
     }
   }
 
+  // --- Timer and Event Handlers ---
   function startTimer() {
     if (timer) clearInterval(timer);
     timer = setInterval(update, intervalMs);
+    console.log(`Auto-refresh started at ${intervalMs / 1000}s interval.`);
   }
 
   trackBtn.addEventListener('click', update);
@@ -309,6 +477,7 @@
     startTimer();
   });
 
+  // Initial load and start
   update();
   startTimer();
 </script>
