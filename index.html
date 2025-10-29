@@ -313,16 +313,7 @@ downloadBtn.addEventListener('click', ()=> {
   prepareDownload(type);
 });
 
-/* wire runScan wrapper to prevent naming collisions */
-async function runScan(type){
-  await runScanInner(type);
-}
-async function runScanInner(type){
-  await runScanImplementation(type);
-}
 
-/* We implement the actual runner under a different name to avoid accidental recursion */
-async function runScanImplementation(filterType){ await runScan(filterType); }
 </script>
 </body>
 </html>
