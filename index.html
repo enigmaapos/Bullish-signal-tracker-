@@ -1,134 +1,328 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>EMA Wick Detector (Green/Red, Batch 1D, PH Time)</title>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>EMA Wick Detector — Batch Table UI (PH Time)</title>
   <style>
-    body {font-family: Inter, sans-serif; background: #0f172a; color: #f1f5f9; margin: 0; padding: 20px;}
-    h1 {color: #38bdf8;}
-    button {
-      border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; margin-right: 10px;
+    :root{
+      --bg:#071022; --card:#0b1220; --muted:#8aa3bf; --accent:#38bdf8;
+      --success:#22c55e; --danger:#ef4444; --table:#0f1726; --glow: 0 8px 30px rgba(56,189,248,0.08);
     }
-    #greenBtn {background: #22c55e; color: #0f172a;}
-    #greenBtn:hover {background: #16a34a;}
-    #redBtn {background: #ef4444; color: #f1f5f9;}
-    #redBtn:hover {background: #dc2626;}
-    #progress {margin-top: 10px; font-size: 14px; color: #94a3b8;}
-    #bar {height: 10px; background: #334155; border-radius: 5px; margin-top: 5px; overflow: hidden;}
-    #bar-inner {height: 100%; width: 0%; background: #38bdf8; transition: width 0.3s ease;}
-    #results {margin-top: 20px; white-space: pre-wrap; background: #1e293b; padding: 15px; border-radius: 10px;}
-    #timezone {color: #a3e635; margin-top: 10px; font-size: 14px;}
+    body{background:var(--bg); color:#e6eef8; font-family:Inter,Segoe UI,Roboto,Arial,sans-serif; margin:0; padding:20px}
+    .wrap{max-width:1100px;margin:0 auto}
+    .card{background:var(--card); padding:18px; border-radius:12px; box-shadow:var(--glow)}
+    h1{margin:0 0 8px 0; color:var(--accent)}
+    p{color:var(--muted); margin:6px 0 14px 0}
+    .controls{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+    button{border:0;padding:10px 14px;border-radius:10px;font-weight:600;cursor:pointer}
+    #greenBtn{background:linear-gradient(90deg,#16a34a,#22c55e); color:#04201a}
+    #redBtn{background:linear-gradient(90deg,#dc2626,#ef4444); color:#fff}
+    #downloadBtn{background:#334155;color:#e6eef8}
+    .meta{font-size:13px;color:var(--muted); margin-bottom:8px}
+    .progress{margin-top:8px}
+    .bar{height:12px;background:#061826;border-radius:8px;overflow:hidden}
+    .bar-inner{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),#60a5fa);transition:width .25s}
+    table{width:100%;border-collapse:collapse;margin-top:14px;background:var(--table);border-radius:8px;overflow:hidden}
+    thead th{background:linear-gradient(90deg,#041828,#092133);padding:12px;text-align:left;font-size:13px;color:#cfeefe;border-bottom:1px solid rgba(255,255,255,0.03);box-shadow:inset 0 -1px 0 rgba(255,255,255,0.02)}
+    tbody td{padding:10px 12px;font-size:13px;color:#e6eef8;border-bottom:1px solid rgba(255,255,255,0.02)}
+    tbody tr:nth-child(even){background:rgba(255,255,255,0.01)}
+    .sym{font-weight:700;color:#f8fafc}
+    .date{color:#9fb8d1}
+    .status-green{background:linear-gradient(90deg, rgba(34,197,94,0.08), transparent); color:var(--success); padding:6px 8px;border-radius:6px; display:inline-block}
+    .status-red{background:linear-gradient(90deg, rgba(239,68,68,0.08), transparent); color:var(--danger); padding:6px 8px;border-radius:6px; display:inline-block}
+    .small{font-size:12px;color:var(--muted)}
+    .note{margin-top:10px;color:var(--muted);font-size:13px}
+    @media (max-width:700px){thead th,tbody td{font-size:12px;padding:8px}}
   </style>
 </head>
 <body>
-  <h1>📊 EMA Wick Detector (1D Batch Mode) – Binance Futures</h1>
-  <p>Detects candles whose wick is entirely inside EMA14 and EMA70.<br>Scans Binance USDT perpetual pairs in batches of 10 (PH Time).</p>
-  <div id="timezone">🕒 Philippine Standard Time (UTC+8)</div>
+  <div class="wrap">
+    <div class="card">
+      <h1>EMA Wick Detector — Batch Table UI</h1>
+      <p>Scans Binance Futures USDT perpetual pairs in batches of 10. Shows pairs whose **latest 1D candle (PH session)** has its full wick inside EMA14 & EMA70.</p>
 
-  <button id="greenBtn">🟢 Scan Green (24h Positive)</button>
-  <button id="redBtn">🔴 Scan Red (24h Negative)</button>
+      <div class="controls">
+        <button id="greenBtn">🟢 Scan Green (24h +%)</button>
+        <button id="redBtn">🔴 Scan Red (24h -%)</button>
+        <button id="downloadBtn" disabled>⬇️ Download Results</button>
+      </div>
 
-  <div id="progress">Progress: Not started</div>
-  <div id="bar"><div id="bar-inner"></div></div>
-  <div id="results"></div>
+      <div class="meta">🕒 Showing times in Philippine Standard Time (UTC+8)</div>
 
-  <script>
-    const delay = ms => new Promise(res => setTimeout(res, ms));
-    const maxCandles = 200;
-    const batchSize = 10;
-    const batchDelay = 1500;
+      <div class="progress">
+        <div id="progressText" class="small">Progress: idle</div>
+        <div class="bar"><div id="barInner" class="bar-inner"></div></div>
+      </div>
 
-    async function fetchSymbols() {
-      const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr');
-      const data = await res.json();
-      return data.filter(s => s.symbol.endsWith('USDT') && !s.symbol.includes('_'));
+      <table id="resultsTable" style="display:none">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Date (PH)</th>
+            <th>High</th>
+            <th>Low</th>
+            <th>EMA14</th>
+            <th>EMA70</th>
+            <th>24h %</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="resultsBody"></tbody>
+      </table>
+
+      <div id="empty" class="note">No results yet. Run a scan (green or red).</div>
+      <div class="note">Batch size: <strong>10</strong> | Delay between batches: <strong>1500ms</strong> | Candles fetched: <strong>200</strong></div>
+    </div>
+  </div>
+
+<script>
+/* ====== Configuration ====== */
+const BATCH_SIZE = 10;
+const BATCH_DELAY_MS = 1500;
+const MAX_CANDLES = 200;
+const EMA_SHORT = 14;
+const EMA_LONG = 70;
+const BLACKLIST = ["ALPACAUSDT","BNXUSDT","ALPHAUSDT","OCEANUSDT","DGBUSDT","AGIXUSDT","LINAUSDT","LOKAUSDT","KEYUSDT","MDTUSDT","LOOMUSDT","RENUSDT","OMNIUSDT","SLERFUSDT","STMXUSDT","UXLINKUSDT","BSWUSDT","NEIROETHUSDT","VIDTUSDT","TROYUSDT","BAKEUSDT","AMBUSDT","MEMEFIUSDT","NULSUSDT","HIFIUSDT","LEVERUSDT","XEMUSDT","STRAXUSDT","COMBOUSDT"];
+/* =========================== */
+
+const greenBtn = document.getElementById('greenBtn');
+const redBtn = document.getElementById('redBtn');
+const downloadBtn = document.getElementById('downloadBtn');
+const progressText = document.getElementById('progressText');
+const barInner = document.getElementById('barInner');
+const resultsTable = document.getElementById('resultsTable');
+const resultsBody = document.getElementById('resultsBody');
+const emptyNote = document.getElementById('empty');
+
+let currentResults = [];
+let running = false;
+
+function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
+// Fetch exchangeInfo once to know which symbols are PERPETUAL
+async function fetchPerpSymbols(){
+  const res = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo');
+  if(!res.ok) throw new Error('exchangeInfo failed');
+  const data = await res.json();
+  const syms = (data.symbols || []).filter(s => s.contractType && s.contractType.toUpperCase() === 'PERPETUAL' && s.symbol.endsWith('USDT') && s.status === 'TRADING').map(s=>s.symbol);
+  return Array.from(new Set(syms)).sort();
+}
+
+// Fetch 24hr tickers (gives priceChangePercent)
+async function fetch24hrTickers(){
+  const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr');
+  if(!res.ok) throw new Error('ticker/24hr failed');
+  const arr = await res.json();
+  // map by symbol
+  const map = new Map();
+  for(const t of arr) map.set(t.symbol, t);
+  return map;
+}
+
+// Fetch klines for a symbol
+async function fetchKlines(symbol){
+  const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${encodeURIComponent(symbol)}&interval=1d&limit=${MAX_CANDLES}`;
+  const res = await fetch(url);
+  if(!res.ok) throw new Error(`klines ${symbol} failed: ${res.status}`);
+  return await res.json();
+}
+
+// Compute EMA seeded with SMA for correct starting value
+function computeEMA(closes, period){
+  const ema = new Array(closes.length).fill(null);
+  if(closes.length < period) return ema;
+  let sum = 0;
+  for(let i=0;i<period;i++) sum += closes[i];
+  let prev = sum/period;
+  ema[period-1] = prev;
+  const k = 2/(period+1);
+  for(let i=period;i<closes.length;i++){
+    const curr = closes[i];
+    const e = (curr - prev)*k + prev;
+    ema[i] = e;
+    prev = e;
+  }
+  return ema;
+}
+
+// Convert ms timestamp (openTime) to PH time string
+function toPHDateString(openTimeMs){
+  const d = new Date(Number(openTimeMs));
+  // Convert UTC -> PH (UTC+8)
+  const ph = new Date(d.getTime() + 8*60*60*1000);
+  return ph.toISOString().replace('T',' ').split('.')[0];
+}
+
+// Detect only the most recent candle (last index)
+async function inspectSymbol(symbol){
+  try{
+    const klines = await fetchKlines(symbol);
+    if(!Array.isArray(klines) || klines.length === 0) return null;
+    const closes = klines.map(k => Number(k[4]));
+    const highs = klines.map(k => Number(k[2]));
+    const lows  = klines.map(k => Number(k[3]));
+    const ema14 = computeEMA(closes, EMA_SHORT);
+    const ema70 = computeEMA(closes, EMA_LONG);
+    const i = closes.length - 1;
+    if(ema14[i] == null || ema70[i] == null) return null; // not enough history
+    const high = highs[i], low = lows[i];
+    const e14 = ema14[i], e70 = ema70[i];
+    const upper = Math.max(e14, e70);
+    const lower = Math.min(e14, e70);
+    if(high <= upper && low >= lower){
+      return {
+        symbol,
+        datePH: toPHDateString(klines[i][0]),
+        high, low,
+        ema14: e14, ema70: e70
+      };
+    }
+    return null;
+  } catch(err){
+    console.warn('inspectSymbol error', symbol, err);
+    return null;
+  }
+}
+
+// Main runner: filterType = 'green' or 'red'
+async function runScan(filterType){
+  if(running) return;
+  running = true;
+  currentResults = [];
+  resultsBody.innerHTML = '';
+  resultsTable.style.display = 'none';
+  emptyNote.textContent = 'Preparing scan...';
+  downloadBtn.disabled = true;
+  greenBtn.disabled = true;
+  redBtn.disabled = true;
+
+  try{
+    progressText.textContent = 'Fetching symbol list and 24h data...';
+    const [perpSymbols, tickersMap] = await Promise.all([fetchPerpSymbols(), fetch24hrTickers()]);
+
+    // Filter out blacklist and symbols not in ticker map
+    let symbols = perpSymbols.filter(s=> !BLACKLIST.includes(s) && tickersMap.has(s));
+
+    // Apply green/red filter
+    symbols = symbols.filter(s => {
+      const t = tickersMap.get(s);
+      const pct = parseFloat(t.priceChangePercent || '0');
+      return filterType === 'green' ? pct > 0 : pct < 0;
+    });
+
+    if(symbols.length === 0){
+      emptyNote.textContent = `No symbols to scan for ${filterType}.`;
+      progressText.textContent = 'Done';
+      running = false;
+      greenBtn.disabled = false;
+      redBtn.disabled = false;
+      return;
     }
 
-    async function fetchKlines(symbol) {
-      const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1d&limit=${maxCandles}`;
-      const res = await fetch(url);
-      return await res.json();
-    }
+    emptyNote.textContent = `Scanning ${symbols.length} symbols (${filterType}) — batches of ${BATCH_SIZE}...`;
+    const total = symbols.length;
+    let completed = 0;
 
-    function ema(values, period) {
-      const k = 2 / (period + 1);
-      const emaArray = [values[0]];
-      for (let i = 1; i < values.length; i++) {
-        emaArray.push(values[i] * k + emaArray[i - 1] * (1 - k));
+    for(let start = 0; start < symbols.length; start += BATCH_SIZE){
+      const batch = symbols.slice(start, start + BATCH_SIZE);
+      progressText.textContent = `Scanning batch ${Math.floor(start/BATCH_SIZE)+1} / ${Math.ceil(symbols.length/BATCH_SIZE)}...`;
+      // run batch in parallel
+      const promises = batch.map(sym => inspectSymbol(sym));
+      const batchResults = await Promise.all(promises);
+      for(const r of batchResults){
+        completed++;
+        const percent = Math.round((completed/total)*1000)/10;
+        barInner.style.width = `${percent}%`;
+        progressText.textContent = `Progress: ${completed}/${total} (${percent}%)`;
+        if(r) {
+          // find 24h % from ticker map
+          const t = tickersMap.get(r.symbol);
+          const pct = parseFloat(t.priceChangePercent || '0').toFixed(2);
+          currentResults.push({
+            symbol: r.symbol,
+            datePH: r.datePH,
+            high: r.high,
+            low: r.low,
+            ema14: r.ema14,
+            ema70: r.ema70,
+            pct
+          });
+          // add row to table
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td class="sym">${r.symbol}</td>
+            <td class="date">${r.datePH}</td>
+            <td>${r.high}</td>
+            <td>${r.low}</td>
+            <td>${r.ema14.toFixed(6)}</td>
+            <td>${r.ema70.toFixed(6)}</td>
+            <td>${pct}%</td>
+            <td>${filterType === 'green' ? '<span class="status-green">Green</span>' : '<span class="status-red">Red</span>'}</td>
+          `;
+          resultsBody.appendChild(tr);
+        }
       }
-      return emaArray;
-    }
-
-    async function detectInsideWick(symbol) {
-      const klines = await fetchKlines(symbol);
-      const closes = klines.map(k => parseFloat(k[4]));
-      const highs = klines.map(k => parseFloat(k[2]));
-      const lows = klines.map(k => parseFloat(k[3]));
-      const ema14 = ema(closes, 14);
-      const ema70 = ema(closes, 70);
-      let matches = [];
-
-      // only check the most recent candle
-      const i = klines.length - 1;
-      const high = highs[i], low = lows[i];
-      const e14 = ema14[i], e70 = ema70[i];
-      const t = new Date(klines[i][0]);
-      t.setHours(t.getHours() + 8);
-      const timePH = t.toISOString().replace('T', ' ').split('.')[0];
-      const upper = Math.max(e14, e70), lower = Math.min(e14, e70);
-      if (high <= upper && low >= lower) {
-        matches.push(`${symbol} | ${timePH} | Wick inside EMA14 & EMA70`);
-      }
-      return matches;
-    }
-
-    async function runScan(filterType) {
-      document.getElementById('progress').textContent = 'Fetching symbols...';
-      const all = await fetchSymbols();
-      const symbols = all
-        .filter(s => (filterType === 'green' ? parseFloat(s.priceChangePercent) > 0 : parseFloat(s.priceChangePercent) < 0))
-        .map(s => s.symbol);
-
-      const results = [];
-      const total = symbols.length;
-      let completed = 0;
-
-      for (let i = 0; i < symbols.length; i += batchSize) {
-        const batch = symbols.slice(i, i + batchSize);
-        document.getElementById('progress').textContent = `Scanning batch ${Math.ceil(i/batchSize)+1} of ${Math.ceil(total/batchSize)}...`;
-
-        const promises = batch.map(async symbol => {
-          try {
-            const found = await detectInsideWick(symbol);
-            if (found.length) results.push(...found);
-          } catch (e) {
-            console.error('Error on', symbol, e);
-          } finally {
-            completed++;
-            const percent = ((completed / total) * 100).toFixed(1);
-            document.getElementById('progress').textContent = `Progress: ${completed}/${total} (${percent}%)`;
-            document.getElementById('bar-inner').style.width = `${percent}%`;
-          }
-        });
-
-        await Promise.all(promises);
-        await delay(batchDelay);
+      // show table if there is any row
+      if(resultsBody.children.length) {
+        resultsTable.style.display = 'table';
+        emptyNote.textContent = '';
+      } else {
+        emptyNote.textContent = 'No matching candles yet (scanning)...';
       }
 
-      document.getElementById('progress').textContent = '✅ Scan complete';
-      const output = results.length ? results.join('\n') : 'No inside wick candles found.';
-      document.getElementById('results').textContent = output;
-
-      const blob = new Blob([output], { type: 'text/plain' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `ema_wick_results_${filterType}_PHtime.txt`;
-      a.click();
+      // Delay between batches
+      await sleep(BATCH_DELAY_MS);
     }
 
-    document.getElementById('greenBtn').addEventListener('click', () => runScan('green'));
-    document.getElementById('redBtn').addEventListener('click', () => runScan('red'));
-  </script>
+    progressText.textContent = `✅ Scan complete — ${currentResults.length} matches found.`;
+    if(currentResults.length === 0){
+      emptyNote.textContent = `Scan complete — no inside-wick candles found for ${filterType}.`;
+    } else {
+      emptyNote.textContent = `Scan complete — ${currentResults.length} matches shown in table.`;
+      downloadBtn.disabled = false;
+    }
+  } catch(err){
+    console.error('Scan error', err);
+    progressText.textContent = 'Error: ' + (err && err.message ? err.message : err);
+    emptyNote.textContent = 'An error occurred — check console.';
+  } finally {
+    running = false;
+    greenBtn.disabled = false;
+    redBtn.disabled = false;
+  }
+}
+
+// Prepare download of results
+function prepareDownload(filterType){
+  if(currentResults.length === 0) return;
+  const header = `EMA Wick Detector — EMA${EMA_SHORT}/EMA${EMA_LONG} — ${filterType.toUpperCase()} scan\nPhilippine Time (UTC+8)\nDate: ${new Date().toISOString()}\n\n`;
+  const lines = currentResults.map(r => `${r.symbol} | ${r.datePH} | high=${r.high} low=${r.low} | EMA14=${r.ema14.toFixed(6)} EMA70=${r.ema70.toFixed(6)} | 24h%=${r.pct}`);
+  const blob = new Blob([header + lines.join('\n')], {type:'text/plain'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `ema_wick_${filterType}_PHtime.txt`;
+  a.click();
+}
+
+greenBtn.addEventListener('click', ()=>{ if(!running){ resultsBody.innerHTML=''; currentResults=[]; barInner.style.width='0%'; runScan('green'); }});
+redBtn.addEventListener('click', ()=>{ if(!running){ resultsBody.innerHTML=''; currentResults=[]; barInner.style.width='0%'; runScan('red'); }});
+downloadBtn.addEventListener('click', ()=> {
+  // decide which type name to use based on first result's 24h pct sign
+  const type = currentResults.length && parseFloat(currentResults[0].pct) > 0 ? 'green' : 'red';
+  prepareDownload(type);
+});
+
+/* wire runScan wrapper to prevent naming collisions */
+async function runScan(type){
+  await runScanInner(type);
+}
+async function runScanInner(type){
+  await runScanImplementation(type);
+}
+
+/* We implement the actual runner under a different name to avoid accidental recursion */
+async function runScanImplementation(filterType){ await runScan(filterType); }
+</script>
 </body>
 </html>
