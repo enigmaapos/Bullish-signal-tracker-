@@ -1,0 +1,162 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>EMA Wick Detector — Binance Futures (1D)</title>
+  <style>
+    body{font-family:Inter,Segoe UI,Roboto,Arial,sans-serif;background:#0f172a;color:#e6eef8;padding:20px}
+    .card{background:#0b1220;border-radius:12px;padding:18px;box-shadow:0 6px 18px rgba(2,6,23,.6);max-width:900px;margin:0 auto}
+    label,button{display:block;margin-top:10px}
+    input,select,textarea{width:100%;padding:10px;border-radius:8px;border:1px solid #223046;background:#071022;color:#e6eef8}
+    button{cursor:pointer;padding:10px 14px;border:none}
+    .row{display:flex;gap:10px}
+    .row > *{flex:1}
+    pre{white-space:pre-wrap;background:#03121b;padding:10px;border-radius:8px;max-height:420px;overflow:auto}
+    small{color:#8aa3bf}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>EMA Wick Detector — Binance Futures (PERP, 1D)</h2>
+    <p>Detects candles whose entire wick (high → low) lies between EMA(14) and EMA(70) on the 1D timeframe. Outputs results in plain text and lets you download them.</p><label>Symbol (Perpetual USDT pair):</label>
+<input id="symbol" value="BTCUSDT" placeholder="e.g. BTCUSDT, ETHUSDT" />
+
+<div class="row">
+  <div>
+    <label>Lookback (number of daily candles to fetch, max 1000):</label>
+    <input id="limit" type="number" value="500" min="100" max="1000" />
+  </div>
+  <div>
+    <label>EMA periods:</label>
+    <div class="row">
+      <input id="emaShort" value="14" />
+      <input id="emaLong" value="70" />
+    </div>
+  </div>
+</div>
+
+<button id="run">Run detection</button>
+<button id="download" disabled>Download text result</button>
+<label><small>Result (text):</small></label>
+<pre id="output">— waiting to run —</pre>
+
+<p><small>Notes: Uses Binance Futures REST API (fapi). This is a client-side demo; if you want background alerts or websocket streaming, ask for a Node/Server implementation.</small></p>
+
+  </div>  <script>
+    // Helper: fetch klines from Binance Futures (USDT Perpetual)
+    async function fetchKlines(symbol, interval = '1d', limit = 500) {
+      const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Binance API error: ' + res.status + ' ' + res.statusText);
+      return res.json(); // array of kline arrays
+    }
+
+    // Compute EMA array for a given period over the close prices
+    function computeEMA(closes, period) {
+      const k = 2 / (period + 1);
+      const ema = new Array(closes.length).fill(null);
+      // seed with SMA for first period
+      if (closes.length < period) return ema;
+      let sum = 0;
+      for (let i = 0; i < period; i++) sum += closes[i];
+      let prev = sum / period;
+      ema[period - 1] = prev;
+      for (let i = period; i < closes.length; i++) {
+        const curr = closes[i];
+        const e = (curr - prev) * k + prev;
+        ema[i] = e;
+        prev = e;
+      }
+      return ema;
+    }
+
+    // Convert kline (array) to a nice object
+    function klineToObj(k) {
+      return {
+        openTime: Number(k[0]),
+        open: Number(k[1]),
+        high: Number(k[2]),
+        low: Number(k[3]),
+        close: Number(k[4]),
+        volume: Number(k[5]),
+        closeTime: Number(k[6])
+      };
+    }
+
+    // Main detection logic
+    async function detectWicks(symbol, limit, shortP, longP) {
+      const raw = await fetchKlines(symbol, '1d', limit);
+      if (!Array.isArray(raw) || raw.length === 0) throw new Error('No klines returned');
+      const klines = raw.map(klineToObj);
+
+      // We want arrays in chronological order (old -> new) — Binance already returns that.
+      const closes = klines.map(k => k.close);
+      const emaShort = computeEMA(closes, shortP);
+      const emaLong = computeEMA(closes, longP);
+
+      const results = [];
+      for (let i = 0; i < klines.length; i++) {
+        const eS = emaShort[i], eL = emaLong[i];
+        if (eS == null || eL == null) continue; // EMAs not ready yet
+        const high = klines[i].high;
+        const low = klines[i].low;
+        const top = Math.max(eS, eL);
+        const bottom = Math.min(eS, eL);
+
+        const inside = (high <= top + Number.EPSILON) && (low >= bottom - Number.EPSILON);
+        if (inside) {
+          const dt = new Date(klines[i].openTime);
+          const iso = dt.toISOString().split('T')[0];
+          results.push(`${iso} | ${symbol} | Candle index ${i} | high=${high} low=${low} | EMA${shortP}=${eS.toFixed(5)} EMA${longP}=${eL.toFixed(5)}`);
+        }
+      }
+
+      return {klines, results};
+    }
+
+    // UI wiring
+    const runBtn = document.getElementById('run');
+    const out = document.getElementById('output');
+    const downloadBtn = document.getElementById('download');
+
+    runBtn.addEventListener('click', async () => {
+      const symbol = document.getElementById('symbol').value.trim().toUpperCase();
+      const limit = Math.min(Math.max(100, Number(document.getElementById('limit').value || 500)), 1000);
+      const shortP = Math.max(2, Math.floor(Number(document.getElementById('emaShort').value) || 14));
+      const longP = Math.max(shortP+1, Math.floor(Number(document.getElementById('emaLong').value) || 70));
+
+      out.textContent = 'Fetching klines for ' + symbol + ' (1d) — please wait...';
+      downloadBtn.disabled = true;
+
+      try {
+        const {klines, results} = await detectWicks(symbol, limit, shortP, longP);
+        if (results.length === 0) {
+          out.textContent = `No candles found where the wick is entirely between EMA${shortP} and EMA${longP} in the last ${klines.length} daily candles.`;
+        } else {
+          out.textContent = results.join('\n');
+        }
+
+        // Prepare download
+        const header = `Symbol: ${symbol}\nInterval: 1d\nEMA periods: ${shortP}, ${longP}\nFetched candles: ${klines.length}\n\n`;
+        const body = out.textContent;
+        const blob = new Blob([header + body], {type: 'text/plain'});
+        const url = URL.createObjectURL(blob);
+        downloadBtn.href = url;
+        downloadBtn.download = `${symbol}_ema${shortP}_ema${longP}_wick_detection.txt`;
+        downloadBtn.disabled = false;
+      } catch (err) {
+        out.textContent = 'Error: ' + (err.message || err);
+        console.error(err);
+      }
+    });
+
+    // Turn the download button into an anchor by wrapping onclick
+    downloadBtn.addEventListener('click', (e) => {
+      // nothing extra — the href is set after run. If disabled, prevent action.
+      if (downloadBtn.disabled) e.preventDefault();
+    });
+
+  </script></body>
+</html>
