@@ -1,35 +1,42 @@
 <!doctype html>
-
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>EMA Wick Detector (1D) – Binance Futures PH Time</title>
+  <title>EMA Wick Detector (Batch 1D, PH Time)</title>
   <style>
     body {font-family: Inter, sans-serif; background: #0f172a; color: #f1f5f9; margin: 0; padding: 20px;}
     h1 {color: #38bdf8;}
     button {background: #38bdf8; color: #0f172a; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;}
     button:hover {background: #0ea5e9;}
     #progress {margin-top: 10px; font-size: 14px; color: #94a3b8;}
+    #bar {height: 10px; background: #334155; border-radius: 5px; margin-top: 5px; overflow: hidden;}
+    #bar-inner {height: 100%; width: 0%; background: #38bdf8; transition: width 0.3s ease;}
     #results {margin-top: 20px; white-space: pre-wrap; background: #1e293b; padding: 15px; border-radius: 10px;}
     #timezone {color: #a3e635; margin-top: 10px; font-size: 14px;}
   </style>
 </head>
 <body>
-  <h1>📊 EMA Wick Detector (1D) – Binance Futures</h1>
-  <p>Detects candles whose wicks are inside EMA14 and EMA70 on 1D timeframe.<br>Scans all Binance USDT perpetual pairs once (safe from rate limit).</p>
-  <div id="timezone">🕒 Showing times in Philippine Standard Time (UTC+8)</div>
-  <button id="startScan">Run Full Market Scan (once)</button>
+  <h1>📊 EMA Wick Detector (1D Batch Mode) – Binance Futures</h1>
+  <p>Detects candles whose wick is entirely inside EMA14 and EMA70.<br>Scans all Binance USDT perpetual pairs in batches of 10 (PH Time).</p>
+  <div id="timezone">🕒 Philippine Standard Time (UTC+8)</div>
+  <button id="startScan">Run Market Scan (Batch Mode)</button>
   <div id="progress">Progress: Not started</div>
-  <div id="results"></div>  <script>
+  <div id="bar"><div id="bar-inner"></div></div>
+  <div id="results"></div>
+
+  <script>
     const delay = ms => new Promise(res => setTimeout(res, ms));
     const maxCandles = 200;
-    const requestDelay = 500; // ms between requests
+    const batchSize = 10; // 10 pairs per batch
+    const batchDelay = 1500; // ms between batches
 
     async function fetchSymbols() {
       const res = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo');
       const data = await res.json();
-      return data.symbols.filter(s => s.symbol.endsWith('USDT') && s.contractType === 'PERPETUAL').map(s => s.symbol);
+      return data.symbols
+        .filter(s => s.symbol.endsWith('USDT') && s.contractType === 'PERPETUAL')
+        .map(s => s.symbol);
     }
 
     async function fetchKlines(symbol) {
@@ -60,7 +67,7 @@
         const high = highs[i], low = lows[i];
         const e14 = ema14[i], e70 = ema70[i];
         const t = new Date(klines[i][0]);
-        t.setHours(t.getHours() + 8); // convert to PH time (UTC+8)
+        t.setHours(t.getHours() + 8); // Convert to Philippine time
         const timePH = t.toISOString().replace('T', ' ').split('.')[0];
         const upper = Math.max(e14, e70), lower = Math.min(e14, e70);
         if (high <= upper && low >= lower) {
@@ -74,18 +81,29 @@
       document.getElementById('progress').textContent = 'Fetching symbols...';
       const symbols = await fetchSymbols();
       const results = [];
-      let count = 0;
+      const total = symbols.length;
+      let completed = 0;
 
-      for (const symbol of symbols) {
-        count++;
-        document.getElementById('progress').textContent = `Scanning ${symbol} (${count}/${symbols.length})...`;
-        try {
-          const found = await detectInsideWick(symbol);
-          if (found.length) results.push(...found);
-        } catch (e) {
-          console.error('Error on', symbol, e);
-        }
-        await delay(requestDelay);
+      for (let i = 0; i < symbols.length; i += batchSize) {
+        const batch = symbols.slice(i, i + batchSize);
+        document.getElementById('progress').textContent = `Scanning batch ${Math.ceil(i/batchSize)+1} of ${Math.ceil(total/batchSize)}...`;
+
+        const promises = batch.map(async symbol => {
+          try {
+            const found = await detectInsideWick(symbol);
+            if (found.length) results.push(...found);
+          } catch (e) {
+            console.error('Error on', symbol, e);
+          } finally {
+            completed++;
+            const percent = ((completed / total) * 100).toFixed(1);
+            document.getElementById('progress').textContent = `Progress: ${completed}/${total} (${percent}%)`;
+            document.getElementById('bar-inner').style.width = `${percent}%`;
+          }
+        });
+
+        await Promise.all(promises);
+        await delay(batchDelay);
       }
 
       document.getElementById('progress').textContent = '✅ Scan complete';
@@ -96,10 +114,11 @@
       const blob = new Blob([output], { type: 'text/plain' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'ema_wick_results_PHtime.txt';
+      a.download = 'ema_wick_results_batch_PHtime.txt';
       a.click();
     }
 
     document.getElementById('startScan').addEventListener('click', runScan);
-  </script></body>
+  </script>
+</body>
 </html>
