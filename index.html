@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>15m Max Zone Pump & Dump Detector (with Strength Δ)</title>
+  <title>15m Max Zone Pump & Dump Detector (with Δ & Count)</title>
   <style>
     body {
       font-family: Inter, sans-serif;
@@ -25,13 +25,15 @@
     }
     #status { margin-top: 10px; color: #94a3b8; font-size: 0.9em; }
     #status strong { color: #38bdf8; }
+    #mover-count { margin-top: 6px; color: #38bdf8; font-size: 1em; font-weight: 600; }
   </style>
 </head>
 <body>
-  <h1>🧠 15-Minute Max Zone Pump & Dump Detector (Green 3%+ Movers)</h1>
-  <p>Scans Binance Futures USDT pairs with 24h price change ≥ +3% and shows RSI strength (Δ value).</p>
+  <h1>🧠 15-Minute Max Zone Pump & Dump Detector (Δ Strength + Green 3%+ Movers)</h1>
+  <p>Scans Binance Futures USDT pairs with 24h price change ≥ +3%. Shows RSI Δ strength and live mover count.</p>
 
   <div id="status">⏳ Initializing...</div>
+  <div id="mover-count">Loading movers...</div>
 
   <div class="section">
     <h2 class="pump">Max Zone Pump</h2>
@@ -89,6 +91,11 @@
         }));
 
       symbols = movers.map(m => m.symbol);
+
+      // ✅ Show live count
+      document.getElementById("mover-count").innerHTML =
+        `📈 Total 24h Green Movers (≥ +3%): <strong>${symbols.length}</strong>`;
+
       updateStatus(`✅ Loaded ${symbols.length} bullish movers (+3%).`);
     }
 
@@ -120,12 +127,12 @@
       return rsiArr;
     }
 
-    // ✅ Compute RSI strength difference like in TSX
+    // ✅ Compute RSI diff + color it
     function detectZone(rsi) {
       const recent = rsi.slice(-RSI_PERIOD);
       const high = Math.max(...recent);
       const low = Math.min(...recent);
-      const diff = parseFloat((high - low).toFixed(2)); // same as pumpStrength
+      const diff = parseFloat((high - low).toFixed(2));
       const start = recent[0];
       const end = recent[recent.length - 1];
       const direction = end > start ? "pump" : end < start ? "dump" : "neutral";
@@ -133,6 +140,12 @@
       if (direction === "pump" && diff >= 30) return { zone: "MAX ZONE PUMP", diff };
       if (direction === "dump" && diff >= 30) return { zone: "MAX ZONE DUMP", diff };
       return null;
+    }
+
+    function getDiffColor(diff, direction) {
+      if (diff >= 45) return direction === "pump" ? "#22c55e" : "#ef4444"; // strong
+      if (diff >= 30) return "#facc15"; // medium
+      return "#94a3b8"; // weak
     }
 
     async function analyzeSymbol(symbol) {
@@ -183,15 +196,17 @@
         if (activeSignals[result.symbol]) return;
 
         const list = result.zone.includes("PUMP") ? pumpList : dumpList;
-        const item = document.createElement("li");
         const color = result.zone.includes("PUMP") ? "#22c55e" : "#ef4444";
+        const diffColor = getDiffColor(result.diff, result.zone.includes("PUMP") ? "pump" : "dump");
+
+        const item = document.createElement("li");
         item.innerHTML = `
           <div>
             <span class="symbol">${result.symbol}</span> → ${result.zone}
             <span class="meta">
               | 💰 ${result.price} | 
               <span style="color:${color};">${result.change}%</span> | 
-              Δ ${result.diff} | 
+              Δ <span style="color:${diffColor};">${result.diff}</span> | 
               🕒 ${result.time}
             </span>
           </div>
