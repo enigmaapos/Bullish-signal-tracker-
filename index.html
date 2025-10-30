@@ -242,20 +242,28 @@
 
     runScanner();
 
-    // 🟢 Live 24h price & change updater (offset by 10s for safety)
+    // 🟢 Live 24h price & % updater (safe & clean)
 setInterval(() => {
   for (const symbol in activeSignals) {
     const ticker = movers.find(m => m.symbol === symbol);
-    if (ticker) {
-      const item = activeSignals[symbol];
-      const color = ticker.change >= 0 ? "#22c55e" : "#ef4444";
-      item.querySelector(".meta").innerHTML =
-        `| 💰 ${ticker.price.toFixed(4)} | 
-         <span style="color:${color};">${ticker.change.toFixed(2)}%</span> | 
-         ${item.querySelector(".meta").innerHTML.split("|").slice(2).join("|")}`;
-    }
+    if (!ticker) continue;
+
+    const item = activeSignals[symbol];
+    const meta = item.querySelector(".meta");
+    if (!meta) continue;
+
+    const color = ticker.change >= 0 ? "#22c55e" : "#ef4444";
+    const metaText = meta.innerHTML;
+
+    // Replace only the % part safely using regex
+    const updatedMeta = metaText.replace(
+      /\|\s*💰.*?\|\s*<span style="color:[^"]+;">.*?<\/span>/,
+      `| 💰 ${ticker.price.toFixed(4)} | <span style="color:${color};">${ticker.change.toFixed(2)}%</span>`
+    );
+
+    meta.innerHTML = updatedMeta;
   }
-}, 40000); // refresh displayed data every 40s (safe offset)
+}, 30000); // every 30s
   </script>
 </body>
 </html>
