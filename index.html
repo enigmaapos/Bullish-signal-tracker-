@@ -17,12 +17,17 @@
     .dump { color: #ef4444; font-weight: bold; }
     .symbol { font-weight: 600; }
     .meta { color: #94a3b8; font-size: 0.9em; }
+    .highlight {
+      background: rgba(56,189,248,0.2);
+      border-left: 4px solid #38bdf8;
+      padding: 4px 8px;
+      border-radius: 8px;
+    }
   </style>
 </head>
 <body>
   <h1>🧠 15-Minute Max Zone Pump & Dump Detector</h1>
-  <p>Safe scan with Binance Futures USDT pairs (rate-limit protected).</p>
-  <p id="status" style="color:#94a3b8; font-size:0.9em;">Initializing scanner...</p>
+  <p>Live Binance Futures scanner with real-time 24h price change & top mover highlight.</p>
 
   <div class="section">
     <h2 class="pump">Max Zone Pump</h2>
@@ -34,6 +39,8 @@
     <ul id="dump-list"></ul>
   </div>
 
+  <p id="last-update" style="color:#94a3b8;margin-top:20px;font-size:0.9em;"></p>
+
   <script>
     const API_URL = "https://fapi.binance.com";
     const TIMEFRAME = "15m";
@@ -42,55 +49,48 @@
     const RSI_PERIOD = 14;
     const MIN_DELAY = 400;
     const MAX_DELAY = 800;
+    const MAX_ITEMS = 10;
     let symbols = [];
     let currentIndex = 0;
 
-    // ✅ Blacklist (from your TSX file)
     const blacklist = [
-      "ALPACAUSDT", "BNXUSDT", "ALPHAUSDT", "OCEANUSDT", "DGBUSDT", "AGIXUSDT",
-      "LINAUSDT", "LOKAUSDT", "KEYUSDT", "MDTUSDT", "LOOMUSDT", "RENUSDT",
-      "OMNIUSDT", "SLERFUSDT", "STMXUSDT", "UXLINKUSDT", "BSWUSDT",
-      "NEIROETHUSDT", "VIDTUSDT", "TROYUSDT", "BAKEUSDT", "AMBUSDT",
-      "MEMEFIUSDT", "NULSUSDT", "HIFIUSDT", "LEVERUSDT", "XEMUSDT",
-      "STRAXUSDT", "COMBOUSDT"
+      "ALPACAUSDT","BNXUSDT","ALPHAUSDT","OCEANUSDT","DGBUSDT","AGIXUSDT",
+      "LINAUSDT","LOKAUSDT","KEYUSDT","MDTUSDT","LOOMUSDT","RENUSDT",
+      "OMNIUSDT","SLERFUSDT","STMXUSDT","UXLINKUSDT","BSWUSDT",
+      "NEIROETHUSDT","VIDTUSDT","TROYUSDT","BAKEUSDT","AMBUSDT",
+      "MEMEFIUSDT","NULSUSDT","HIFIUSDT","LEVERUSDT","XEMUSDT",
+      "STRAXUSDT","COMBOUSDT"
     ];
 
     const delay = (ms) => new Promise(res => setTimeout(res, ms));
+    const activeSignals = {};
 
     async function fetchSymbols() {
       const res = await fetch(`${API_URL}/fapi/v1/exchangeInfo`);
       const data = await res.json();
       symbols = data.symbols
-        .filter(s =>
-          s.contractType === "PERPETUAL" &&
-          s.quoteAsset === "USDT" &&
-          !blacklist.includes(s.symbol)
-        )
+        .filter(s => s.contractType === "PERPETUAL" && s.quoteAsset === "USDT" && !blacklist.includes(s.symbol))
         .map(s => s.symbol);
-      console.log(`✅ Loaded ${symbols.length} Futures USDT pairs (after blacklist).`);
+      console.log(`✅ Loaded ${symbols.length} USDT pairs`);
     }
 
     async function getKlines(symbol) {
       const res = await fetch(`${API_URL}/fapi/v1/klines?symbol=${symbol}&interval=${TIMEFRAME}&limit=100`);
       const data = await res.json();
-      return data.map(k => parseFloat(k[4])); // closing prices
+      return data.map(k => parseFloat(k[4]));
     }
 
     async function get24hTicker(symbol) {
       const res = await fetch(`${API_URL}/fapi/v1/ticker/24hr?symbol=${symbol}`);
       const data = await res.json();
-      return {
-        price: parseFloat(data.lastPrice),
-        change: parseFloat(data.priceChangePercent)
-      };
+      return { price: parseFloat(data.lastPrice), change: parseFloat(data.priceChangePercent) };
     }
 
     function calculateRSI(closes, period = RSI_PERIOD) {
       let gains = 0, losses = 0;
       for (let i = 1; i < period; i++) {
         const diff = closes[i] - closes[i - 1];
-        if (diff >= 0) gains += diff;
-        else losses -= diff;
+        if (diff >= 0) gains += diff; else losses -= diff;
       }
       let avgGain = gains / period;
       let avgLoss = losses / period;
@@ -129,63 +129,62 @@
         const zone = detectZone(rsi);
         if (!zone) return null;
 
-        // Get price + 24h change for context
         const ticker = await get24hTicker(symbol);
         const timestamp = new Date().toLocaleTimeString();
-
-        return {
-          symbol,
-          zone,
-          price: ticker.price.toFixed(4),
-          change: ticker.change.toFixed(2),
-          time: timestamp
-        };
-      } catch (err) {
-        console.warn(`⚠️ Error analyzing ${symbol}:`, err.message);
+        return { symbol, zone, price: ticker.price.toFixed(4), change: ticker.change.toFixed(2), time: timestamp };
+      } catch {
         return null;
       }
     }
 
     async function fetchBatch() {
-  if (!symbols.length) return;
+      const batch = symbols.slice(currentIndex, currentIndex + BATCH_SIZE);
+      currentIndex = (currentIndex + BATCH_SIZE) % symbols.length;
 
-  const batch = symbols.slice(currentIndex, currentIndex + BATCH_SIZE);
-  currentIndex = (currentIndex + BATCH_SIZE) % symbols.length;
+      const results = [];
+      for (const symbol of batch) {
+        const result = await analyzeSymbol(symbol);
+        if (result) results.push(result);
 
-  // 🟢 Show current scan batch in the UI
-  document.getElementById("status").textContent =
-    `🔍 Scanning ${batch.length} symbols: ${batch.join(", ")}`;
+        const delayTime = MIN_DELAY + Math.random() * (MAX_DELAY - MIN_DELAY);
+        await delay(delayTime);
+      }
 
-  console.log(`🔍 Scanning batch: ${batch.join(", ")}`);
+      // 🧠 Identify highest 24h change among results
+      const allChanges = results.map(r => r.change);
+      const maxChange = Math.max(...allChanges);
 
-  for (const symbol of batch) {
-    const result = await analyzeSymbol(symbol);
+      // Update UI for each result
+      for (const result of results) {
+        const symbol = result.symbol;
+        if (activeSignals[symbol]) activeSignals[symbol].remove();
 
-    if (result) {
-      console.log(`✅ ${symbol} → ${result.zone} | ${result.price} | ${result.change}%`);
+        const list = result.zone.includes("PUMP")
+          ? document.getElementById("pump-list")
+          : document.getElementById("dump-list");
 
-      const list = result.zone.includes("PUMP")
-        ? document.getElementById("pump-list")
-        : document.getElementById("dump-list");
+        const item = document.createElement("li");
+        const color = result.change > 0 ? "#22c55e" : result.change < 0 ? "#ef4444" : "#94a3b8";
+        const highlight = result.change === maxChange ? 'class="highlight"' : '';
+        item.innerHTML = `
+          <div ${highlight}>
+            <span class="symbol">${result.symbol}</span> → ${result.zone}
+            <span class="meta">
+              | 💰 ${result.price} |
+              <span style="color:${color};">${result.change}%</span> |
+              🕒 ${result.time}
+            </span>
+          </div>
+        `;
 
-      const item = document.createElement("li");
-      const color =
-        result.change > 0 ? "#22c55e" : result.change < 0 ? "#ef4444" : "#94a3b8";
+        list.prepend(item);
+        activeSignals[symbol] = item;
+        while (list.children.length > MAX_ITEMS) list.removeChild(list.lastChild);
+      }
 
-      item.innerHTML = `
-        <span class="symbol">${result.symbol}</span> → ${result.zone}
-        <span class="meta">
-          | 💰 ${result.price} | 
-          <span style="color:${color};">${result.change}%</span> | 🕒 ${result.time}
-        </span>`;
-      list.prepend(item);
+      document.getElementById("last-update").textContent =
+        "Last updated: " + new Date().toLocaleTimeString();
     }
-
-    // Wait before next request
-    const delayTime = MIN_DELAY + Math.random() * (MAX_DELAY - MIN_DELAY);
-    await delay(delayTime);
-  }
-          }
 
     async function runScanner() {
       await fetchSymbols();
