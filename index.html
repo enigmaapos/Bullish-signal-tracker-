@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>15m Max Zone Pump & Dump Detector</title>
+  <title>15m Max Zone Pump Detector (Green 10%+ Movers)</title>
   <style>
     body {
       font-family: Inter, sans-serif;
@@ -23,19 +23,13 @@
       padding: 4px 8px;
       border-radius: 8px;
     }
-    #status {
-      margin-top: 10px;
-      color: #94a3b8;
-      font-size: 0.9em;
-    }
-    #status strong {
-      color: #38bdf8;
-    }
+    #status { margin-top: 10px; color: #94a3b8; font-size: 0.9em; }
+    #status strong { color: #38bdf8; }
   </style>
 </head>
 <body>
-  <h1>🧠 15-Minute Max Zone Pump & Dump Detector</h1>
-  <p>Live Binance Futures scanner with visible scanning indicator & top mover highlight.</p>
+  <h1>🧠 15-Minute Max Zone Pump Detector (Green 10%+ Movers)</h1>
+  <p>Scanning only Binance Futures USDT pairs with 24h price change ≥ +10%.</p>
 
   <div id="status">⏳ Initializing...</div>
 
@@ -44,23 +38,19 @@
     <ul id="pump-list"></ul>
   </div>
 
-  <div class="section">
-    <h2 class="dump">Max Zone Dump</h2>
-    <ul id="dump-list"></ul>
-  </div>
-
   <p id="last-update" style="color:#94a3b8;margin-top:20px;font-size:0.9em;"></p>
 
   <script>
     const API_URL = "https://fapi.binance.com";
     const TIMEFRAME = "15m";
-    const BATCH_SIZE = 5;
-    const INTERVAL_MS = 3000;
+    const BATCH_SIZE = 3;
+    const INTERVAL_MS = 8000; // 8 seconds per batch
     const RSI_PERIOD = 14;
-    const MIN_DELAY = 400;
-    const MAX_DELAY = 800;
+    const MIN_DELAY = 800;
+    const MAX_DELAY = 1500;
     const MAX_ITEMS = 10;
     let symbols = [];
+    let movers = [];
     let currentIndex = 0;
 
     const blacklist = [
@@ -74,32 +64,36 @@
 
     const delay = (ms) => new Promise(res => setTimeout(res, ms));
     const activeSignals = {};
+    const updateStatus = (text) => document.getElementById("status").innerHTML = text;
 
-    const updateStatus = (text) => {
-      document.getElementById("status").innerHTML = text;
-    };
-
-    async function fetchSymbols() {
-      updateStatus("🔄 Loading Binance Futures pairs...");
-      const res = await fetch(`${API_URL}/fapi/v1/exchangeInfo`);
+    // ✅ Step 1: Fetch only top bullish 24h movers (≥ +10%)
+    async function fetchTopMovers() {
+      updateStatus("📊 Fetching 24h bullish movers...");
+      const res = await fetch(`${API_URL}/fapi/v1/ticker/24hr`);
       const data = await res.json();
-      symbols = data.symbols
-        .filter(s => s.contractType === "PERPETUAL" && s.quoteAsset === "USDT" && !blacklist.includes(s.symbol))
-        .map(s => s.symbol);
-      updateStatus(`✅ Loaded <strong>${symbols.length}</strong> USDT pairs. Starting scan...`);
-      console.log(`✅ Loaded ${symbols.length} Futures USDT pairs`);
+
+      // Keep only green (positive) movers with +10% or higher change
+      movers = data
+        .filter(d =>
+          d.symbol.endsWith("USDT") &&
+          !blacklist.includes(d.symbol) &&
+          parseFloat(d.priceChangePercent) >= 3 // ✅ only green movers
+        )
+        .map(d => ({
+          symbol: d.symbol,
+          change: parseFloat(d.priceChangePercent),
+          price: parseFloat(d.lastPrice)
+        }));
+
+      symbols = movers.map(m => m.symbol);
+      updateStatus(`🔥 Found <strong>${symbols.length}</strong> bullish movers (≥ +10%).`);
+      console.log("Bullish movers:", movers);
     }
 
     async function getKlines(symbol) {
       const res = await fetch(`${API_URL}/fapi/v1/klines?symbol=${symbol}&interval=${TIMEFRAME}&limit=100`);
       const data = await res.json();
       return data.map(k => parseFloat(k[4]));
-    }
-
-    async function get24hTicker(symbol) {
-      const res = await fetch(`${API_URL}/fapi/v1/ticker/24hr?symbol=${symbol}`);
-      const data = await res.json();
-      return { price: parseFloat(data.lastPrice), change: parseFloat(data.priceChangePercent) };
     }
 
     function calculateRSI(closes, period = RSI_PERIOD) {
@@ -133,7 +127,6 @@
       const end = recent[recent.length - 1];
       const direction = end > start ? "pump" : end < start ? "dump" : "neutral";
       if (direction === "pump" && diff >= 30) return "MAX ZONE PUMP";
-      if (direction === "dump" && diff >= 30) return "MAX ZONE DUMP";
       return null;
     }
 
@@ -143,19 +136,27 @@
         const rsi = calculateRSI(closes);
         const zone = detectZone(rsi);
         if (!zone) return null;
-        const ticker = await get24hTicker(symbol);
+
+        const ticker = movers.find(m => m.symbol === symbol);
         const timestamp = new Date().toLocaleTimeString();
-        return { symbol, zone, price: ticker.price.toFixed(4), change: ticker.change.toFixed(2), time: timestamp };
-      } catch (err) {
-        console.warn(`⚠️ ${symbol} error:`, err.message);
+        return {
+          symbol,
+          zone,
+          price: ticker ? ticker.price.toFixed(4) : "—",
+          change: ticker ? ticker.change.toFixed(2) : "0.00",
+          time: timestamp
+        };
+      } catch {
         return null;
       }
     }
 
     async function fetchBatch() {
+      if (symbols.length === 0) return;
+
       const batch = symbols.slice(currentIndex, currentIndex + BATCH_SIZE);
       currentIndex = (currentIndex + BATCH_SIZE) % symbols.length;
-      updateStatus(`🔍 Scanning batch starting at index <strong>${currentIndex}</strong>...`);
+      updateStatus(`🔍 Scanning bullish batch starting at index <strong>${currentIndex}</strong>...`);
 
       const results = [];
       for (const symbol of batch) {
@@ -167,25 +168,16 @@
       }
 
       if (results.length === 0) {
-        updateStatus(`⏸️ No signals found this batch — continuing...`);
-        document.getElementById("last-update").textContent =
-          "Last updated: " + new Date().toLocaleTimeString() + " — no active zones yet.";
+        updateStatus(`⏸️ No signals found in this batch.`);
         return;
       }
 
-      const allChanges = results.map(r => r.change);
-      const maxChange = Math.max(...allChanges);
+      const maxChange = Math.max(...results.map(r => r.change));
 
       for (const result of results) {
-        const symbol = result.symbol;
-        if (activeSignals[symbol]) activeSignals[symbol].remove();
-
-        const list = result.zone.includes("PUMP")
-          ? document.getElementById("pump-list")
-          : document.getElementById("dump-list");
-
+        const list = document.getElementById("pump-list");
         const item = document.createElement("li");
-        const color = result.change > 0 ? "#22c55e" : result.change < 0 ? "#ef4444" : "#94a3b8";
+        const color = "#22c55e";
         const highlight = result.change === maxChange ? 'class="highlight"' : '';
         item.innerHTML = `
           <div ${highlight}>
@@ -198,19 +190,20 @@
           </div>
         `;
         list.prepend(item);
-        activeSignals[symbol] = item;
         while (list.children.length > MAX_ITEMS) list.removeChild(list.lastChild);
       }
 
       document.getElementById("last-update").textContent =
         "Last updated: " + new Date().toLocaleTimeString();
-      updateStatus(`✅ Finished scanning batch — waiting ${INTERVAL_MS/1000}s before next.`);
+      updateStatus(`✅ Batch complete — waiting ${INTERVAL_MS/1000}s...`);
     }
 
     async function runScanner() {
-      await fetchSymbols();
+      await fetchTopMovers();
       await fetchBatch();
       setInterval(fetchBatch, INTERVAL_MS);
+      // Refresh movers every 5 minutes
+      setInterval(fetchTopMovers, 300000);
     }
 
     runScanner();
