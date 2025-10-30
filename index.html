@@ -71,7 +71,7 @@
       symbols = data.symbols
         .filter(s => s.contractType === "PERPETUAL" && s.quoteAsset === "USDT" && !blacklist.includes(s.symbol))
         .map(s => s.symbol);
-      console.log(`✅ Loaded ${symbols.length} USDT pairs`);
+      console.log(`✅ Loaded ${symbols.length} Futures USDT pairs`);
     }
 
     async function getKlines(symbol) {
@@ -132,12 +132,14 @@
         const ticker = await get24hTicker(symbol);
         const timestamp = new Date().toLocaleTimeString();
         return { symbol, zone, price: ticker.price.toFixed(4), change: ticker.change.toFixed(2), time: timestamp };
-      } catch {
+      } catch (err) {
+        console.warn(`⚠️ ${symbol} error:`, err.message);
         return null;
       }
     }
 
     async function fetchBatch() {
+      console.log("🔍 Scanning batch:", currentIndex);
       const batch = symbols.slice(currentIndex, currentIndex + BATCH_SIZE);
       currentIndex = (currentIndex + BATCH_SIZE) % symbols.length;
 
@@ -145,16 +147,21 @@
       for (const symbol of batch) {
         const result = await analyzeSymbol(symbol);
         if (result) results.push(result);
-
         const delayTime = MIN_DELAY + Math.random() * (MAX_DELAY - MIN_DELAY);
         await delay(delayTime);
       }
 
-      // 🧠 Identify highest 24h change among results
+      // 🧠 Prevent crash if no results
+      if (results.length === 0) {
+        console.log("⏸️ No pump/dump zones found this batch.");
+        document.getElementById("last-update").textContent =
+          "Last updated: " + new Date().toLocaleTimeString() + " — No signals this round.";
+        return;
+      }
+
       const allChanges = results.map(r => r.change);
       const maxChange = Math.max(...allChanges);
 
-      // Update UI for each result
       for (const result of results) {
         const symbol = result.symbol;
         if (activeSignals[symbol]) activeSignals[symbol].remove();
