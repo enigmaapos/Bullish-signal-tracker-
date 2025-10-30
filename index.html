@@ -3,267 +3,161 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>15m Max Zone Pump & Dump Detector + Live Market Sentiment</title>
+  <title>15m + 1D Max Zone Pump & Dump Detector + Live Sentiment</title>
   <style>
-    body {
-      font-family: Inter, sans-serif;
-      background: #0b1120;
-      color: #fff;
-      padding: 20px;
-    }
-    h1 { color: #38bdf8; }
-    .section { margin-top: 20px; }
-    .pump { color: #22c55e; font-weight: bold; }
-    .dump { color: #ef4444; font-weight: bold; }
-    .symbol { font-weight: 600; }
-    .meta { color: #94a3b8; font-size: 0.9em; }
-    .highlight {
-      background: rgba(56,189,248,0.2);
-      border-left: 4px solid #38bdf8;
-      padding: 4px 8px;
-      border-radius: 8px;
-    }
-    #status { margin-top: 10px; color: #94a3b8; font-size: 0.9em; }
-    #status strong { color: #38bdf8; }
-    #sentiment {
-      margin-top: 12px;
-      font-size: 1em;
-      font-weight: 600;
-      color: #38bdf8;
-    }
-    #sentiment .bull { color: #22c55e; }
-    #sentiment .bear { color: #ef4444; }
+    body { font-family: Inter, sans-serif; background:#0b1120; color:#fff; padding:20px; }
+    h1 { color:#38bdf8; }
+    .section { margin-top:20px; }
+    .pump { color:#22c55e; font-weight:bold; }
+    .dump { color:#ef4444; font-weight:bold; }
+    .symbol { font-weight:600; }
+    .meta { color:#94a3b8; font-size:0.9em; }
+    .highlight { background:rgba(56,189,248,0.2); border-left:4px solid #38bdf8; padding:4px 8px; border-radius:8px; }
+    #status { margin-top:10px; color:#94a3b8; font-size:0.9em; }
+    #status strong { color:#38bdf8; }
+    #sentiment { margin-top:12px; font-size:1em; font-weight:600; color:#38bdf8; }
+    #sentiment .bull { color:#22c55e; }
+    #sentiment .bear { color:#ef4444; }
+    h2 { margin-top:15px; }
   </style>
 </head>
 <body>
-  <h1>🧠 15-Minute Max Zone Pump & Dump Detector (Live Market Sentiment)</h1>
-  <p>Scans Binance Futures USDT pairs with 24h price change ≥ +3%. Auto-updates every 30s.</p>
+  <h1>🧠 Dual-Timeframe Max Zone Pump & Dump Detector</h1>
+  <p>Scans Binance Futures (USDT pairs ≥ +3%). Runs both 15m and 1D analyses. Auto-updates every 30 s.</p>
 
   <div id="status">⏳ Initializing...</div>
   <div id="sentiment">📊 Market Sentiment: Loading...</div>
 
-  <div class="section">
-    <h2 class="pump">Max Zone Pump</h2>
-    <ul id="pump-list"></ul>
+  <div id="scanner-15m" class="section">
+    <h2>🕒 15-Minute Timeframe</h2>
+    <h3 class="pump">Max Zone Pump</h3>
+    <ul id="pump-15m"></ul>
+    <h3 class="dump">Max Zone Dump</h3>
+    <ul id="dump-15m"></ul>
   </div>
 
-  <div class="section">
-    <h2 class="dump">Max Zone Dump</h2>
-    <ul id="dump-list"></ul>
+  <div id="scanner-1d" class="section">
+    <h2>📅 1-Day Timeframe</h2>
+    <h3 class="pump">Max Zone Pump</h3>
+    <ul id="pump-1d"></ul>
+    <h3 class="dump">Max Zone Dump</h3>
+    <ul id="dump-1d"></ul>
   </div>
 
   <p id="last-update" style="color:#94a3b8;margin-top:20px;font-size:0.9em;"></p>
 
   <script>
-    const API_URL = "https://fapi.binance.com";
-    const TIMEFRAME = "15m";
-    const BATCH_SIZE = 3;
-    const INTERVAL_MS = 8000;
-    const RSI_PERIOD = 14;
-    const MIN_DELAY = 800;
-    const MAX_DELAY = 1500;
-    const MAX_ITEMS = 10;
+    const API_URL="https://fapi.binance.com";
+    const RSI_PERIOD=14, BATCH_SIZE=3, MIN_DELAY=800, MAX_DELAY=1500, MAX_ITEMS=10;
+    const INTERVAL_15M=8000, INTERVAL_1D=15000; // staggered for safety
+    const activeSignals15m={}, activeSignals1d={};
+    const blacklist=["ALPACAUSDT","BNXUSDT","ALPHAUSDT","OCEANUSDT","DGBUSDT","AGIXUSDT","LINAUSDT","LOKAUSDT","KEYUSDT","MDTUSDT","LOOMUSDT","RENUSDT","OMNIUSDT","SLERFUSDT","STMXUSDT","UXLINKUSDT","BSWUSDT","NEIROETHUSDT","VIDTUSDT","TROYUSDT","BAKEUSDT","AMBUSDT","MEMEFIUSDT","NULSUSDT","HIFIUSDT","LEVERUSDT","XEMUSDT","STRAXUSDT","COMBOUSDT"];
+    let movers=[],symbols=[],currentIndex=0;
 
-    let symbols = [];
-    let movers = [];
-    let currentIndex = 0;
-    const activeSignals = {};
-    const delay = (ms) => new Promise(res => setTimeout(res, ms));
-    const updateStatus = (msg) => (document.getElementById("status").innerHTML = msg);
+    const delay=ms=>new Promise(r=>setTimeout(r,ms));
+    const updateStatus=msg=>document.getElementById("status").innerHTML=msg;
 
-    const blacklist = [
-      "ALPACAUSDT","BNXUSDT","ALPHAUSDT","OCEANUSDT","DGBUSDT","AGIXUSDT",
-      "LINAUSDT","LOKAUSDT","KEYUSDT","MDTUSDT","LOOMUSDT","RENUSDT",
-      "OMNIUSDT","SLERFUSDT","STMXUSDT","UXLINKUSDT","BSWUSDT",
-      "NEIROETHUSDT","VIDTUSDT","TROYUSDT","BAKEUSDT","AMBUSDT",
-      "MEMEFIUSDT","NULSUSDT","HIFIUSDT","LEVERUSDT","XEMUSDT",
-      "STRAXUSDT","COMBOUSDT"
-    ];
-
-    // 🧮 Live Market Sentiment
-    async function fetchMarketSentiment() {
-      const res = await fetch(`${API_URL}/fapi/v1/ticker/24hr`);
-      const data = await res.json();
-
-      const filtered = data.filter(d => d.symbol.endsWith("USDT") && !blacklist.includes(d.symbol));
-      const green = filtered.filter(d => parseFloat(d.priceChangePercent) > 0).length;
-      const red = filtered.filter(d => parseFloat(d.priceChangePercent) < 0).length;
-      const total = green + red;
-      const bullishPct = ((green / total) * 100).toFixed(1);
-      const bearishPct = ((red / total) * 100).toFixed(1);
-
-      document.getElementById("sentiment").innerHTML =
-        `📈 <span class="bull">Green: ${green}</span> | ` +
-        `📉 <span class="bear">Red: ${red}</span> | ` +
-        `🧭 Sentiment: <span class="bull">${bullishPct}% Bullish</span> / ` +
-        `<span class="bear">${bearishPct}% Bearish</span>`;
-
+    // 🧭 Market Sentiment
+    async function fetchMarketSentiment(){
+      const res=await fetch(`${API_URL}/fapi/v1/ticker/24hr`);
+      const data=await res.json();
+      const filtered=data.filter(d=>d.symbol.endsWith("USDT")&&!blacklist.includes(d.symbol));
+      const green=filtered.filter(d=>parseFloat(d.priceChangePercent)>0).length;
+      const red=filtered.filter(d=>parseFloat(d.priceChangePercent)<0).length;
+      const total=green+red;
+      const bullPct=((green/total)*100).toFixed(1);
+      const bearPct=((red/total)*100).toFixed(1);
+      document.getElementById("sentiment").innerHTML=
+        `📈 <span class="bull">Green: ${green}</span> | 📉 <span class="bear">Red: ${red}</span> | 🧭 <span class="bull">${bullPct}% Bullish</span> / <span class="bear">${bearPct}% Bearish</span>`;
       return data;
     }
 
-    // ✅ Fetch top green movers (≥ +3%)
-    async function fetchTopMovers() {
-      updateStatus("📊 Updating 24h price change data...");
-      const data = await fetchMarketSentiment();
-
-      movers = data
-        .filter(d =>
-          d.symbol.endsWith("USDT") &&
-          !blacklist.includes(d.symbol) &&
-          parseFloat(d.priceChangePercent) >= 3
-        )
-        .map(d => ({
-          symbol: d.symbol,
-          price: parseFloat(d.lastPrice),
-          change: parseFloat(d.priceChangePercent)
-        }));
-
-      symbols = movers.map(m => m.symbol);
-      updateStatus(`✅ Loaded ${symbols.length} bullish movers (+3%).`);
+    // ✅ Fetch top movers (≥ +3%)
+    async function fetchTopMovers(){
+      updateStatus("📊 Updating 24h data...");
+      const data=await fetchMarketSentiment();
+      movers=data.filter(d=>d.symbol.endsWith("USDT")&&!blacklist.includes(d.symbol)&&parseFloat(d.priceChangePercent)>=3)
+                 .map(d=>({symbol:d.symbol,price:+d.lastPrice,change:+d.priceChangePercent}));
+      symbols=movers.map(m=>m.symbol);
+      updateStatus(`✅ Loaded ${symbols.length} bullish movers.`);
     }
 
-    async function getKlines(symbol) {
-      const res = await fetch(`${API_URL}/fapi/v1/klines?symbol=${symbol}&interval=${TIMEFRAME}&limit=100`);
-      const data = await res.json();
-      return data.map(k => parseFloat(k[4]));
+    async function getKlines(symbol,interval){
+      const res=await fetch(`${API_URL}/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=100`);
+      const data=await res.json();
+      return data.map(k=>+k[4]);
     }
 
-    function calculateRSI(closes, period = RSI_PERIOD) {
-      let gains = 0, losses = 0;
-      for (let i = 1; i < period; i++) {
-        const diff = closes[i] - closes[i - 1];
-        if (diff >= 0) gains += diff; else losses -= diff;
-      }
-      let avgGain = gains / period;
-      let avgLoss = losses / period;
-      const rsiArr = [];
-      for (let i = period; i < closes.length; i++) {
-        const diff = closes[i] - closes[i - 1];
-        const gain = diff > 0 ? diff : 0;
-        const loss = diff < 0 ? -diff : 0;
-        avgGain = (avgGain * (period - 1) + gain) / period;
-        avgLoss = (avgLoss * (period - 1) + loss) / period;
-        const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-        const rsi = 100 - 100 / (1 + rs);
-        rsiArr.push(rsi);
-      }
-      return rsiArr;
+    function calculateRSI(closes,period=RSI_PERIOD){
+      let gains=0,losses=0;
+      for(let i=1;i<period;i++){const diff=closes[i]-closes[i-1];diff>=0?gains+=diff:losses-=diff;}
+      let avgGain=gains/period,avgLoss=losses/period;const rsiArr=[];
+      for(let i=period;i<closes.length;i++){
+        const diff=closes[i]-closes[i-1],gain=diff>0?diff:0,loss=diff<0?-diff:0;
+        avgGain=(avgGain*(period-1)+gain)/period;avgLoss=(avgLoss*(period-1)+loss)/period;
+        const rs=avgLoss===0?100:avgGain/avgLoss;rsiArr.push(100-100/(1+rs));
+      }return rsiArr;
     }
 
-    function detectZone(rsi) {
-      const recent = rsi.slice(-RSI_PERIOD);
-      const high = Math.max(...recent);
-      const low = Math.min(...recent);
-      const diff = parseFloat((high - low).toFixed(2));
-      const start = recent[0];
-      const end = recent[recent.length - 1];
-      const direction = end > start ? "pump" : end < start ? "dump" : "neutral";
-
-      if (direction === "pump" && diff >= 30) return { zone: "MAX ZONE PUMP", diff };
-      if (direction === "dump" && diff >= 30) return { zone: "MAX ZONE DUMP", diff };
+    function detectZone(rsi){
+      const recent=rsi.slice(-RSI_PERIOD),high=Math.max(...recent),low=Math.min(...recent);
+      const diff=+(high-low).toFixed(2);const dir=recent.at(-1)>recent[0]?"pump":recent.at(-1)<recent[0]?"dump":"neutral";
+      if(dir==="pump"&&diff>=30)return{zone:"MAX ZONE PUMP",diff};
+      if(dir==="dump"&&diff>=30)return{zone:"MAX ZONE DUMP",diff};
       return null;
     }
 
-    async function analyzeSymbol(symbol) {
-      try {
-        const closes = await getKlines(symbol);
-        const rsi = calculateRSI(closes);
-        const result = detectZone(rsi);
-        if (!result) return null;
-
-        const ticker = movers.find(m => m.symbol === symbol);
-        const timestamp = new Date().toLocaleTimeString();
-        return {
-          symbol,
-          zone: result.zone,
-          diff: result.diff,
-          price: ticker?.price.toFixed(4) ?? "—",
-          change: ticker?.change.toFixed(2) ?? "0.00",
-          time: timestamp
-        };
-      } catch {
-        return null;
-      }
+    async function analyzeSymbol(symbol,interval){
+      try{
+        const closes=await getKlines(symbol,interval),rsi=calculateRSI(closes),res=detectZone(rsi);
+        if(!res)return null;
+        const t=movers.find(m=>m.symbol===symbol),time=new Date().toLocaleTimeString();
+        return{symbol,zone:res.zone,diff:res.diff,price:t?.price?.toFixed(4)??"—",change:t?.change?.toFixed(2)??"0.00",time};
+      }catch{return null;}
     }
 
-    async function fetchBatch() {
-      if (symbols.length === 0) return;
-      const batch = symbols.slice(currentIndex, currentIndex + BATCH_SIZE);
-      currentIndex = (currentIndex + BATCH_SIZE) % symbols.length;
-      updateStatus(`🔍 Scanning ${batch.length} / ${symbols.length} green pairs...`);
-
-      const results = [];
-      for (const symbol of batch) {
-        const result = await analyzeSymbol(symbol);
-        if (result) results.push(result);
-        const delayTime = MIN_DELAY + Math.random() * (MAX_DELAY - MIN_DELAY);
-        await delay(delayTime);
-      }
-
-      if (results.length === 0) return;
-
-      const pumpList = document.getElementById("pump-list");
-      const dumpList = document.getElementById("dump-list");
-
-      results.forEach(result => {
-        if (activeSignals[result.symbol]) return;
-
-        const list = result.zone.includes("PUMP") ? pumpList : dumpList;
-        const color = result.zone.includes("PUMP") ? "#22c55e" : "#ef4444";
-
-        const item = document.createElement("li");
-        item.innerHTML = `
-          <div>
-            <span class="symbol">${result.symbol}</span> → ${result.zone}
-            <span class="meta">
-              | 💰 ${result.price} | 
-              <span style="color:${color};">${result.change}%</span> | 
-              Δ ${result.diff} | 
-              🕒 ${result.time}
-            </span>
-          </div>
-        `;
+    async function scan(tf,interval,activeMap){
+      if(symbols.length===0)return;
+      const batch=symbols.slice(currentIndex,currentIndex+BATCH_SIZE);
+      currentIndex=(currentIndex+BATCH_SIZE)%symbols.length;
+      updateStatus(`🔍 ${tf} scanning ${batch.length}/${symbols.length} pairs...`);
+      const results=[];
+      for(const s of batch){const r=await analyzeSymbol(s,interval);if(r)results.push(r);await delay(MIN_DELAY+Math.random()*(MAX_DELAY-MIN_DELAY));}
+      const pump=document.getElementById(`pump-${tf}`),dump=document.getElementById(`dump-${tf}`);
+      results.forEach(r=>{
+        if(activeMap[r.symbol])return;
+        const list=r.zone.includes("PUMP")?pump:dump;
+        const color=r.zone.includes("PUMP")?"#22c55e":"#ef4444";
+        const item=document.createElement("li");
+        item.innerHTML=`<div><span class="symbol">${r.symbol}</span> → ${r.zone}
+        <span class="meta">| 💰 ${r.price} | <span style="color:${color};">${r.change}%</span> | Δ ${r.diff} | 🕒 ${r.time}</span></div>`;
         list.prepend(item);
-        activeSignals[result.symbol] = item;
-
-        while (list.children.length > MAX_ITEMS) list.removeChild(list.lastChild);
+        activeMap[r.symbol]=item;
+        while(list.children.length>MAX_ITEMS)list.removeChild(list.lastChild);
       });
-
-      document.getElementById("last-update").textContent =
-        "Last updated: " + new Date().toLocaleTimeString();
+      document.getElementById("last-update").textContent="Last updated: "+new Date().toLocaleTimeString();
     }
 
-    async function runScanner() {
+    async function run(){
       await fetchTopMovers();
-      await fetchBatch();
-      setInterval(fetchBatch, INTERVAL_MS);
-      setInterval(fetchTopMovers, 30000); // refresh 24h change + sentiment every 30s
+      scan("15m","15m",activeSignals15m);
+      scan("1d","1d",activeSignals1d);
+      setInterval(()=>scan("15m","15m",activeSignals15m),INTERVAL_15M);
+      setInterval(()=>scan("1d","1d",activeSignals1d),INTERVAL_1D);
+      setInterval(fetchTopMovers,30000); // 24h data refresh
     }
+    run();
 
-    runScanner();
-
-    // 🟢 Live 24h price & % updater (safe & clean)
-setInterval(() => {
-  for (const symbol in activeSignals) {
-    const ticker = movers.find(m => m.symbol === symbol);
-    if (!ticker) continue;
-
-    const item = activeSignals[symbol];
-    const meta = item.querySelector(".meta");
-    if (!meta) continue;
-
-    const color = ticker.change >= 0 ? "#22c55e" : "#ef4444";
-    const metaText = meta.innerHTML;
-
-    // Replace only the % part safely using regex
-    const updatedMeta = metaText.replace(
-      /\|\s*💰.*?\|\s*<span style="color:[^"]+;">.*?<\/span>/,
-      `| 💰 ${ticker.price.toFixed(4)} | <span style="color:${color};">${ticker.change.toFixed(2)}%</span>`
-    );
-
-    meta.innerHTML = updatedMeta;
-  }
-}, 30000); // every 30s
+    // 🟢 live 24h % updater
+    setInterval(()=>{
+      [...Object.entries({...activeSignals15m,...activeSignals1d})].forEach(([sym,el])=>{
+        const t=movers.find(m=>m.symbol===sym);if(!t)return;
+        const meta=el.querySelector(".meta");if(!meta)return;
+        const color=t.change>=0?"#22c55e":"#ef4444";
+        meta.innerHTML=meta.innerHTML.replace(/\|\s*💰.*?\|\s*<span style="color:[^"]+;">.*?<\/span>/,
+          `| 💰 ${t.price.toFixed(4)} | <span style="color:${color};">${t.change.toFixed(2)}%</span>`);
+      });
+    },30000);
   </script>
 </body>
 </html>
