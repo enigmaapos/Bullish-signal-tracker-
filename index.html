@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>15m Max Zone Pump & Dump Detector</title>
+  <style>
+    body {
+      font-family: Inter, sans-serif;
+      background: #0b1120;
+      color: #fff;
+      padding: 20px;
+    }
+    h1 { color: #38bdf8; }
+    .section { margin-top: 20px; }
+    .pump { color: #22c55e; font-weight: bold; }
+    .dump { color: #ef4444; font-weight: bold; }
+    .symbol { font-weight: 600; }
+    .meta { color: #94a3b8; font-size: 0.9em; }
+  </style>
+</head>
+<body>
+  <h1>🧠 15-Minute Max Zone Pump & Dump Detector</h1>
+  <p>Safe scan with Binance Futures USDT pairs (rate-limit protected).</p>
+
+  <div class="section">
+    <h2 class="pump">Max Zone Pump</h2>
+    <ul id="pump-list"></ul>
+  </div>
+
+  <div class="section">
+    <h2 class="dump">Max Zone Dump</h2>
+    <ul id="dump-list"></ul>
+  </div>
+
+  <script>
+    const API_URL = "https://fapi.binance.com";
+    const TIMEFRAME = "15m";
+    const BATCH_SIZE = 5;
+    const INTERVAL_MS = 3000;
+    const RSI_PERIOD = 14;
+    const MIN_DELAY = 400;
+    const MAX_DELAY = 800;
+    let symbols = [];
+    let currentIndex = 0;
+
+    // ✅ Blacklist (from your TSX file)
+    const blacklist = [
+      "ALPACAUSDT", "BNXUSDT", "ALPHAUSDT", "OCEANUSDT", "DGBUSDT", "AGIXUSDT",
+      "LINAUSDT", "LOKAUSDT", "KEYUSDT", "MDTUSDT", "LOOMUSDT", "RENUSDT",
+      "OMNIUSDT", "SLERFUSDT", "STMXUSDT", "UXLINKUSDT", "BSWUSDT",
+      "NEIROETHUSDT", "VIDTUSDT", "TROYUSDT", "BAKEUSDT", "AMBUSDT",
+      "MEMEFIUSDT", "NULSUSDT", "HIFIUSDT", "LEVERUSDT", "XEMUSDT",
+      "STRAXUSDT", "COMBOUSDT"
+    ];
+
+    const delay = (ms) => new Promise(res => setTimeout(res, ms));
+
+    async function fetchSymbols() {
+      const res = await fetch(`${API_URL}/fapi/v1/exchangeInfo`);
+      const data = await res.json();
+      symbols = data.symbols
+        .filter(s =>
+          s.contractType === "PERPETUAL" &&
+          s.quoteAsset === "USDT" &&
+          !blacklist.includes(s.symbol)
+        )
+        .map(s => s.symbol);
+      console.log(`✅ Loaded ${symbols.length} Futures USDT pairs (after blacklist).`);
+    }
+
+    async function getKlines(symbol) {
+      const res = await fetch(`${API_URL}/fapi/v1/klines?symbol=${symbol}&interval=${TIMEFRAME}&limit=100`);
+      const data = await res.json();
+      return data.map(k => parseFloat(k[4])); // closing prices
+    }
+
+    async function get24hTicker(symbol) {
+      const res = await fetch(`${API_URL}/fapi/v1/ticker/24hr?symbol=${symbol}`);
+      const data = await res.json();
+      return {
+        price: parseFloat(data.lastPrice),
+        change: parseFloat(data.priceChangePercent)
+      };
+    }
+
+    function calculateRSI(closes, period = RSI_PERIOD) {
+      let gains = 0, losses = 0;
+      for (let i = 1; i < period; i++) {
+        const diff = closes[i] - closes[i - 1];
+        if (diff >= 0) gains += diff;
+        else losses -= diff;
+      }
+      let avgGain = gains / period;
+      let avgLoss = losses / period;
+      const rsiArr = [];
+
+      for (let i = period; i < closes.length; i++) {
+        const diff = closes[i] - closes[i - 1];
+        const gain = diff > 0 ? diff : 0;
+        const loss = diff < 0 ? -diff : 0;
+        avgGain = (avgGain * (period - 1) + gain) / period;
+        avgLoss = (avgLoss * (period - 1) + loss) / period;
+        const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+        const rsi = 100 - 100 / (1 + rs);
+        rsiArr.push(rsi);
+      }
+      return rsiArr;
+    }
+
+    function detectZone(rsi) {
+      const recent = rsi.slice(-RSI_PERIOD);
+      const high = Math.max(...recent);
+      const low = Math.min(...recent);
+      const diff = high - low;
+      const start = recent[0];
+      const end = recent[recent.length - 1];
+      const direction = end > start ? "pump" : end < start ? "dump" : "neutral";
+      if (direction === "pump" && diff >= 30) return "MAX ZONE PUMP";
+      if (direction === "dump" && diff >= 30) return "MAX ZONE DUMP";
+      return null;
+    }
+
+    async function analyzeSymbol(symbol) {
+      try {
+        const closes = await getKlines(symbol);
+        const rsi = calculateRSI(closes);
+        const zone = detectZone(rsi);
+        if (!zone) return null;
+
+        // Get price + 24h change for context
+        const ticker = await get24hTicker(symbol);
+        const timestamp = new Date().toLocaleTimeString();
+
+        return {
+          symbol,
+          zone,
+          price: ticker.price.toFixed(4),
+          change: ticker.change.toFixed(2),
+          time: timestamp
+        };
+      } catch (err) {
+        console.warn(`⚠️ Error analyzing ${symbol}:`, err.message);
+        return null;
+      }
+    }
+
+    async function fetchBatch() {
+      const batch = symbols.slice(currentIndex, currentIndex + BATCH_SIZE);
+      currentIndex = (currentIndex + BATCH_SIZE) % symbols.length;
+
+      for (const symbol of batch) {
+        const result = await analyzeSymbol(symbol);
+        if (result) {
+          const list = result.zone.includes("PUMP")
+            ? document.getElementById("pump-list")
+            : document.getElementById("dump-list");
+          const item = document.createElement("li");
+
+          const color =
+            result.change > 0 ? "#22c55e" : result.change < 0 ? "#ef4444" : "#94a3b8";
+
+          item.innerHTML = `
+            <span class="symbol">${result.symbol}</span> → ${result.zone}
+            <span class="meta">
+              | 💰 ${result.price} | 
+              <span style="color:${color};">${result.change}%</span> | 🕒 ${result.time}
+            </span>`;
+          list.prepend(item);
+        }
+
+        const delayTime = MIN_DELAY + Math.random() * (MAX_DELAY - MIN_DELAY);
+        await delay(delayTime);
+      }
+    }
+
+    async function runScanner() {
+      await fetchSymbols();
+      await fetchBatch();
+      setInterval(fetchBatch, INTERVAL_MS);
+    }
+
+    runScanner();
+  </script>
+</body>
+</html>
