@@ -22,6 +22,7 @@
 <body>
   <h1>🧠 15-Minute Max Zone Pump & Dump Detector</h1>
   <p>Safe scan with Binance Futures USDT pairs (rate-limit protected).</p>
+  <p id="status" style="color:#94a3b8; font-size:0.9em;">Initializing scanner...</p>
 
   <div class="section">
     <h2 class="pump">Max Zone Pump</h2>
@@ -146,33 +147,45 @@
     }
 
     async function fetchBatch() {
-      const batch = symbols.slice(currentIndex, currentIndex + BATCH_SIZE);
-      currentIndex = (currentIndex + BATCH_SIZE) % symbols.length;
+  if (!symbols.length) return;
 
-      for (const symbol of batch) {
-        const result = await analyzeSymbol(symbol);
-        if (result) {
-          const list = result.zone.includes("PUMP")
-            ? document.getElementById("pump-list")
-            : document.getElementById("dump-list");
-          const item = document.createElement("li");
+  const batch = symbols.slice(currentIndex, currentIndex + BATCH_SIZE);
+  currentIndex = (currentIndex + BATCH_SIZE) % symbols.length;
 
-          const color =
-            result.change > 0 ? "#22c55e" : result.change < 0 ? "#ef4444" : "#94a3b8";
+  // 🟢 Show current scan batch in the UI
+  document.getElementById("status").textContent =
+    `🔍 Scanning ${batch.length} symbols: ${batch.join(", ")}`;
 
-          item.innerHTML = `
-            <span class="symbol">${result.symbol}</span> → ${result.zone}
-            <span class="meta">
-              | 💰 ${result.price} | 
-              <span style="color:${color};">${result.change}%</span> | 🕒 ${result.time}
-            </span>`;
-          list.prepend(item);
-        }
+  console.log(`🔍 Scanning batch: ${batch.join(", ")}`);
 
-        const delayTime = MIN_DELAY + Math.random() * (MAX_DELAY - MIN_DELAY);
-        await delay(delayTime);
-      }
+  for (const symbol of batch) {
+    const result = await analyzeSymbol(symbol);
+
+    if (result) {
+      console.log(`✅ ${symbol} → ${result.zone} | ${result.price} | ${result.change}%`);
+
+      const list = result.zone.includes("PUMP")
+        ? document.getElementById("pump-list")
+        : document.getElementById("dump-list");
+
+      const item = document.createElement("li");
+      const color =
+        result.change > 0 ? "#22c55e" : result.change < 0 ? "#ef4444" : "#94a3b8";
+
+      item.innerHTML = `
+        <span class="symbol">${result.symbol}</span> → ${result.zone}
+        <span class="meta">
+          | 💰 ${result.price} | 
+          <span style="color:${color};">${result.change}%</span> | 🕒 ${result.time}
+        </span>`;
+      list.prepend(item);
     }
+
+    // Wait before next request
+    const delayTime = MIN_DELAY + Math.random() * (MAX_DELAY - MIN_DELAY);
+    await delay(delayTime);
+  }
+          }
 
     async function runScanner() {
       await fetchSymbols();
