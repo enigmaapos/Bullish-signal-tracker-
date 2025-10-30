@@ -23,11 +23,21 @@
       padding: 4px 8px;
       border-radius: 8px;
     }
+    #status {
+      margin-top: 10px;
+      color: #94a3b8;
+      font-size: 0.9em;
+    }
+    #status strong {
+      color: #38bdf8;
+    }
   </style>
 </head>
 <body>
   <h1>🧠 15-Minute Max Zone Pump & Dump Detector</h1>
-  <p>Live Binance Futures scanner with real-time 24h price change & top mover highlight.</p>
+  <p>Live Binance Futures scanner with visible scanning indicator & top mover highlight.</p>
+
+  <div id="status">⏳ Initializing...</div>
 
   <div class="section">
     <h2 class="pump">Max Zone Pump</h2>
@@ -65,12 +75,18 @@
     const delay = (ms) => new Promise(res => setTimeout(res, ms));
     const activeSignals = {};
 
+    const updateStatus = (text) => {
+      document.getElementById("status").innerHTML = text;
+    };
+
     async function fetchSymbols() {
+      updateStatus("🔄 Loading Binance Futures pairs...");
       const res = await fetch(`${API_URL}/fapi/v1/exchangeInfo`);
       const data = await res.json();
       symbols = data.symbols
         .filter(s => s.contractType === "PERPETUAL" && s.quoteAsset === "USDT" && !blacklist.includes(s.symbol))
         .map(s => s.symbol);
+      updateStatus(`✅ Loaded <strong>${symbols.length}</strong> USDT pairs. Starting scan...`);
       console.log(`✅ Loaded ${symbols.length} Futures USDT pairs`);
     }
 
@@ -95,7 +111,6 @@
       let avgGain = gains / period;
       let avgLoss = losses / period;
       const rsiArr = [];
-
       for (let i = period; i < closes.length; i++) {
         const diff = closes[i] - closes[i - 1];
         const gain = diff > 0 ? diff : 0;
@@ -128,7 +143,6 @@
         const rsi = calculateRSI(closes);
         const zone = detectZone(rsi);
         if (!zone) return null;
-
         const ticker = await get24hTicker(symbol);
         const timestamp = new Date().toLocaleTimeString();
         return { symbol, zone, price: ticker.price.toFixed(4), change: ticker.change.toFixed(2), time: timestamp };
@@ -139,23 +153,23 @@
     }
 
     async function fetchBatch() {
-      console.log("🔍 Scanning batch:", currentIndex);
       const batch = symbols.slice(currentIndex, currentIndex + BATCH_SIZE);
       currentIndex = (currentIndex + BATCH_SIZE) % symbols.length;
+      updateStatus(`🔍 Scanning batch starting at index <strong>${currentIndex}</strong>...`);
 
       const results = [];
       for (const symbol of batch) {
+        updateStatus(`🔎 Scanning <strong>${symbol}</strong>...`);
         const result = await analyzeSymbol(symbol);
         if (result) results.push(result);
         const delayTime = MIN_DELAY + Math.random() * (MAX_DELAY - MIN_DELAY);
         await delay(delayTime);
       }
 
-      // 🧠 Prevent crash if no results
       if (results.length === 0) {
-        console.log("⏸️ No pump/dump zones found this batch.");
+        updateStatus(`⏸️ No signals found this batch — continuing...`);
         document.getElementById("last-update").textContent =
-          "Last updated: " + new Date().toLocaleTimeString() + " — No signals this round.";
+          "Last updated: " + new Date().toLocaleTimeString() + " — no active zones yet.";
         return;
       }
 
@@ -183,7 +197,6 @@
             </span>
           </div>
         `;
-
         list.prepend(item);
         activeSignals[symbol] = item;
         while (list.children.length > MAX_ITEMS) list.removeChild(list.lastChild);
@@ -191,6 +204,7 @@
 
       document.getElementById("last-update").textContent =
         "Last updated: " + new Date().toLocaleTimeString();
+      updateStatus(`✅ Finished scanning batch — waiting ${INTERVAL_MS/1000}s before next.`);
     }
 
     async function runScanner() {
