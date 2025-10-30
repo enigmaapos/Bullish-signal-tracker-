@@ -242,21 +242,20 @@
 
     runScanner();
 
-    // 🟢 Live 24h price & change updater
+    // 🟢 Live 24h price & change updater (offset by 10s for safety)
 setInterval(() => {
   for (const symbol in activeSignals) {
     const ticker = movers.find(m => m.symbol === symbol);
     if (ticker) {
       const item = activeSignals[symbol];
       const color = ticker.change >= 0 ? "#22c55e" : "#ef4444";
-      // Replace the % change text dynamically
       item.querySelector(".meta").innerHTML =
         `| 💰 ${ticker.price.toFixed(4)} | 
          <span style="color:${color};">${ticker.change.toFixed(2)}%</span> | 
          ${item.querySelector(".meta").innerHTML.split("|").slice(2).join("|")}`;
     }
   }
-}, 30000); // every 30 seconds
+}, 40000); // refresh displayed data every 40s (safe offset)
   </script>
 </body>
 </html>
