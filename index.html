@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>15m Max Zone Pump & Dump Detector (with Δ & Market Color)</title>
+  <title>15m Max Zone Pump & Dump Detector + Live Market Sentiment</title>
   <style>
     body {
       font-family: Inter, sans-serif;
@@ -25,26 +25,22 @@
     }
     #status { margin-top: 10px; color: #94a3b8; font-size: 0.9em; }
     #status strong { color: #38bdf8; }
-    #market-summary {
-      margin-top: 8px;
-      padding: 10px;
-      border-radius: 10px;
-      background: rgba(56,189,248,0.1);
+    #sentiment {
+      margin-top: 12px;
       font-size: 1em;
+      font-weight: 600;
+      color: #38bdf8;
     }
-    .bullish { color: #22c55e; font-weight: bold; }
-    .bearish { color: #ef4444; font-weight: bold; }
-    .neutral { color: #facc15; font-weight: bold; }
+    #sentiment .bull { color: #22c55e; }
+    #sentiment .bear { color: #ef4444; }
   </style>
 </head>
 <body>
-  <h1>🧠 15-Minute Max Zone Pump & Dump Detector (Δ Strength + Market Color)</h1>
-  <p>Scans Binance Futures USDT pairs (≥ +3% for scan). Also shows total green vs red 24h market sentiment.</p>
+  <h1>🧠 15-Minute Max Zone Pump & Dump Detector (Live Market Sentiment)</h1>
+  <p>Scans Binance Futures USDT pairs with 24h price change ≥ +3%. Auto-updates every 30s.</p>
 
   <div id="status">⏳ Initializing...</div>
-
-  <div id="market-summary">Loading market summary...</div>
-  <div id="mover-count" style="margin-top:6px;color:#38bdf8;font-weight:600;"></div>
+  <div id="sentiment">📊 Market Sentiment: Loading...</div>
 
   <div class="section">
     <h2 class="pump">Max Zone Pump</h2>
@@ -84,39 +80,38 @@
       "STRAXUSDT","COMBOUSDT"
     ];
 
-    async function fetchMarketSummary() {
+    // 🧮 Live Market Sentiment
+    async function fetchMarketSentiment() {
       const res = await fetch(`${API_URL}/fapi/v1/ticker/24hr`);
       const data = await res.json();
 
-      const allPairs = data.filter(d =>
-        d.symbol.endsWith("USDT") && !blacklist.includes(d.symbol)
-      );
+      const filtered = data.filter(d => d.symbol.endsWith("USDT") && !blacklist.includes(d.symbol));
+      const green = filtered.filter(d => parseFloat(d.priceChangePercent) > 0).length;
+      const red = filtered.filter(d => parseFloat(d.priceChangePercent) < 0).length;
+      const total = green + red;
+      const bullishPct = ((green / total) * 100).toFixed(1);
+      const bearishPct = ((red / total) * 100).toFixed(1);
 
-      const totalGreen = allPairs.filter(d => parseFloat(d.priceChangePercent) > 0).length;
-      const totalRed = allPairs.filter(d => parseFloat(d.priceChangePercent) < 0).length;
-      const total = totalGreen + totalRed;
-      const sentiment =
-        totalGreen > totalRed
-          ? `<span class="bullish">BULLISH</span> 🟢`
-          : totalRed > totalGreen
-          ? `<span class="bearish">BEARISH</span> 🔴`
-          : `<span class="neutral">NEUTRAL</span> 🟡`;
+      document.getElementById("sentiment").innerHTML =
+        `📈 <span class="bull">Green: ${green}</span> | ` +
+        `📉 <span class="bear">Red: ${red}</span> | ` +
+        `🧭 Sentiment: <span class="bull">${bullishPct}% Bullish</span> / ` +
+        `<span class="bear">${bearishPct}% Bearish</span>`;
 
-      document.getElementById("market-summary").innerHTML = `
-        🌍 Market Sentiment: ${sentiment}<br>
-        🟢 Green (Up 24h): <strong>${totalGreen}</strong> | 🔴 Red (Down 24h): <strong>${totalRed}</strong><br>
-        📊 Total Analyzed: ${total}
-      `;
-
-      return allPairs;
+      return data;
     }
 
+    // ✅ Fetch top green movers (≥ +3%)
     async function fetchTopMovers() {
       updateStatus("📊 Updating 24h price change data...");
-      const allPairs = await fetchMarketSummary();
+      const data = await fetchMarketSentiment();
 
-      movers = allPairs
-        .filter(d => parseFloat(d.priceChangePercent) >= 3)
+      movers = data
+        .filter(d =>
+          d.symbol.endsWith("USDT") &&
+          !blacklist.includes(d.symbol) &&
+          parseFloat(d.priceChangePercent) >= 3
+        )
         .map(d => ({
           symbol: d.symbol,
           price: parseFloat(d.lastPrice),
@@ -124,10 +119,6 @@
         }));
 
       symbols = movers.map(m => m.symbol);
-
-      document.getElementById("mover-count").innerHTML =
-        `📈 Total 24h Green Movers (≥ +3%): <strong>${symbols.length}</strong>`;
-
       updateStatus(`✅ Loaded ${symbols.length} bullish movers (+3%).`);
     }
 
@@ -173,12 +164,6 @@
       return null;
     }
 
-    function getDiffColor(diff, direction) {
-      if (diff >= 45) return direction === "pump" ? "#22c55e" : "#ef4444";
-      if (diff >= 30) return "#facc15";
-      return "#94a3b8";
-    }
-
     async function analyzeSymbol(symbol) {
       try {
         const closes = await getKlines(symbol);
@@ -205,7 +190,7 @@
       if (symbols.length === 0) return;
       const batch = symbols.slice(currentIndex, currentIndex + BATCH_SIZE);
       currentIndex = (currentIndex + BATCH_SIZE) % symbols.length;
-      updateStatus(`🔍 Scanning ${batch.length} / ${symbols.length} bullish pairs...`);
+      updateStatus(`🔍 Scanning ${batch.length} / ${symbols.length} green pairs...`);
 
       const results = [];
       for (const symbol of batch) {
@@ -215,10 +200,7 @@
         await delay(delayTime);
       }
 
-      if (results.length === 0) {
-        updateStatus(`⏸️ No new signals found.`);
-        return;
-      }
+      if (results.length === 0) return;
 
       const pumpList = document.getElementById("pump-list");
       const dumpList = document.getElementById("dump-list");
@@ -228,7 +210,6 @@
 
         const list = result.zone.includes("PUMP") ? pumpList : dumpList;
         const color = result.zone.includes("PUMP") ? "#22c55e" : "#ef4444";
-        const diffColor = getDiffColor(result.diff, result.zone.includes("PUMP") ? "pump" : "dump");
 
         const item = document.createElement("li");
         item.innerHTML = `
@@ -237,27 +218,26 @@
             <span class="meta">
               | 💰 ${result.price} | 
               <span style="color:${color};">${result.change}%</span> | 
-              Δ <span style="color:${diffColor};">${result.diff}</span> | 
+              Δ ${result.diff} | 
               🕒 ${result.time}
             </span>
           </div>
         `;
-
         list.prepend(item);
         activeSignals[result.symbol] = item;
+
         while (list.children.length > MAX_ITEMS) list.removeChild(list.lastChild);
       });
 
       document.getElementById("last-update").textContent =
         "Last updated: " + new Date().toLocaleTimeString();
-      updateStatus(`✅ Batch done — next in ${INTERVAL_MS / 1000}s.`);
     }
 
     async function runScanner() {
       await fetchTopMovers();
       await fetchBatch();
       setInterval(fetchBatch, INTERVAL_MS);
-      setInterval(fetchTopMovers, 300000);
+      setInterval(fetchTopMovers, 30000); // refresh 24h change + sentiment every 30s
     }
 
     runScanner();
